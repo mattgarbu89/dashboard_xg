@@ -221,13 +221,33 @@ try:
       })
       st.line_chart(chart_data)
 
-      # TABELLA ULTIME PARTITE ANALIZZATE
+      # TABELLA ULTIME PARTITE ANALIZZATE (GESTIONE DINAMICA DELLE COLONNE)
       st.subheader('📋 Ultime Partite Processate')
-      st.dataframe(
-          df[['SQUADRA CASA', 'SQUADRA OSPITE', 'GOL CASA', 'GOL OSPITE', 'WIN']]
-          .tail(15)
-          .iloc[::-1]
-      )
+
+      # Rileva automaticamente le colonne disponibili per la tabella
+      cols_disponibili = list(df.columns)
+      cols_da_mostrare = []
+
+      # Cerca colonne squadre o informazioni utili
+      for c in cols_disponibili:
+        if any(
+            k in c.upper()
+            for k in [
+                'CASA',
+                'OSPITE',
+                'SQUADRA',
+                'MATCH',
+                'PARTITA',
+                'GOL',
+                'WIN',
+            ]
+        ):
+          cols_da_mostrare.append(c)
+
+      if not cols_da_mostrare:
+        cols_da_mostrare = cols_disponibili[:5]
+
+      st.dataframe(df[cols_da_mostrare].tail(15).iloc[::-1])
 
     else:
       st.warning(
