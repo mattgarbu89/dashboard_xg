@@ -7,7 +7,7 @@ import streamlit as st
 
 # Configurazione pagina
 st.set_page_config(
-    page_title='Dashboard Incroci xG', page_icon='⚽', layout='wide'
+    page_title='Dashboard Analisi Mercati xG', page_icon='⚽', layout='wide'
 )
 
 # ==========================================
@@ -16,12 +16,11 @@ st.set_page_config(
 LINK_GOOGLE_DRIVE = 'https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing'
 
 
-# Funzione per Convertire il Link Google Fogli/Drive in Link di Download XLSX Diretto
+# Funzione per Convertire il Link Google Fogli in Download XLSX Diretto
 def get_drive_direct_url(url):
   file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
   if file_id_match:
     file_id = file_id_match.group(1)
-    # Esporta direttamente in formato XLSX per Google Fogli
     return f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx'
   return url
 
@@ -53,13 +52,69 @@ def load_clean_df(file_bytes):
   return pd.read_excel(output, sheet_name='INCROCI GEMINI', engine='openpyxl')
 
 
-st.title('⚽ Dashboard Analisi Pareggi (X)')
+# Funzione per determinare l'esito del mercato
+def evaluate_market(row, market):
+  gc = row['GOL CASA']
+  go = row['GOL OSPITE']
+  gt = gc + go
 
-# Pulsante per forzare l'aggiornamento manuale dei dati
+  if market == '1':
+    return int(gc > go)
+  elif market == 'X':
+    return int(gc == go)
+  elif market == '2':
+    return int(go > gc)
+  elif market == '1X':
+    return int(gc >= go)
+  elif market == 'X2':
+    return int(go >= gc)
+  elif market == '12':
+    return int(gc != go)
+
+  elif market == 'OVER 1,5':
+    return int(gt > 1.5)
+  elif market == 'OVER 2,5':
+    return int(gt > 2.5)
+  elif market == 'OVER 3,5':
+    return int(gt > 3.5)
+  elif market == 'UNDER 1,5':
+    return int(gt < 1.5)
+  elif market == 'UNDER 2,5':
+    return int(gt < 2.5)
+  elif market == 'UNDER 3,5':
+    return int(gt < 3.5)
+
+  elif market == 'GOL CASA':
+    return int(gc > 0)
+  elif market == 'OVER 1,5 CASA':
+    return int(gc > 1.5)
+  elif market == 'OVER 2,5 CASA':
+    return int(gc > 2.5)
+  elif market == 'UNDER 1,5 CASA':
+    return int(gc < 1.5)
+  elif market == 'UNDER 2,5 CASA':
+    return int(gc < 2.5)
+
+  elif market == 'GOL OSPITE':
+    return int(go > 0)
+  elif market == 'OVER 1,5 OSPITE':
+    return int(go > 1.5)
+  elif market == 'OVER 2,5 OSPITE':
+    return int(go > 2.5)
+  elif market == 'UNDER 1,5 OSPITE':
+    return int(go < 1.5)
+  elif market == 'UNDER 2,5 OSPITE':
+    return int(go < 2.5)
+
+  return 0
+
+
+st.title('⚽ Dashboard Analisi Tutti i Mercati')
+
+# Pulsante per forzare l'aggiornamento dei dati
 if st.sidebar.button('🔄 Aggiorna Dati da Google Drive'):
   st.cache_data.clear()
 
-# Caricamento Automatico da Drive/Sheets
 direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
@@ -77,78 +132,52 @@ try:
     df_raw = fetch_data_from_drive(direct_url)
 
   if df_raw is not None:
-    df_raw['WIN'] = (df_raw['GOL CASA'] == df_raw['GOL OSPITE']).astype(int)
-    st.success('✅ Dati collegati e aggiornati automaticamente!')
+    # Filtriamo solo le partite con punteggio presente
+    df = df_raw[
+        df_raw['GOL CASA'].notna() & df_raw['GOL OSPITE'].notna()
+    ].copy()
+    df.reset_index(drop=True, inplace=True)
 
-    # COMBINAZIONI SALVATE
-    COMBINAZIONI = {
-        '1. Opzione 2 (313 Match | SOMMA >= -1, MC >= 1.1)': {
-            'SOMMA': -1.0,
-            'MEDIA CASA': 1.1,
-            'MEDIA OSPITE': None,
-            'C1': None,
-            'C2': None,
-            'DC': None,
-        },
-        '2. Gold Standard (140 Match | SOMMA >= -0.5, DC >= 0)': {
-            'SOMMA': -0.5,
-            'MEDIA CASA': 1.1,
-            'MEDIA OSPITE': 1.51,
-            'C1': None,
-            'C2': None,
-            'DC': 0.0,
-        },
-        '3. Top Stabilità (396 Match | C1 >= -1, MO <= 1.7)': {
-            'SOMMA': None,
-            'MEDIA CASA': None,
-            'MEDIA OSPITE': 1.7,
-            'C1': -1.0,
-            'C2': None,
-            'DC': None,
-        },
-        '4. Bilanciata 300+ (304 Match | SOMMA >= -2, MC >= 0.8, MO <= 1.5)': {
-            'SOMMA': -2.0,
-            'MEDIA CASA': 0.8,
-            'MEDIA OSPITE': 1.5,
-            'C1': None,
-            'C2': None,
-            'DC': None,
-        },
-        '5. Base Standard (263 Match | SOMMA >= -1.03, MO <= 1.54)': {
-            'SOMMA': -1.03,
-            'MEDIA CASA': None,
-            'MEDIA OSPITE': 1.54,
-            'C1': None,
-            'C2': None,
-            'DC': None,
-        },
-    }
+    # SELEZIONE MERCATI DALLA SIDEBAR
+    MERCATI = [
+        '1',
+        'X',
+        '2',
+        '1X',
+        'X2',
+        '12',
+        'OVER 1,5',
+        'OVER 2,5',
+        'OVER 3,5',
+        'UNDER 1,5',
+        'UNDER 2,5',
+        'UNDER 3,5',
+        'GOL CASA',
+        'OVER 1,5 CASA',
+        'OVER 2,5 CASA',
+        'UNDER 1,5 CASA',
+        'UNDER 2,5 CASA',
+        'GOL OSPITE',
+        'OVER 1,5 OSPITE',
+        'OVER 2,5 OSPITE',
+        'UNDER 1,5 OSPITE',
+        'UNDER 2,5 OSPITE',
+    ]
 
-    # SELEZIONE DALLA SIDEBAR
-    st.sidebar.header('Filtri Strategia')
-    scelta = st.sidebar.selectbox(
-        'Seleziona Combinazione Salvata', list(COMBINAZIONI.keys())
-    )
+    st.sidebar.header('Seleziona Analisi')
+    mercato_scelto = st.sidebar.selectbox('Mercato da Analizzare', MERCATI)
     finestra_ma = st.sidebar.slider(
-        'Finestra Media Mobile', min_value=10, max_value=30, value=20, step=5
+        'Finestra Media Mobile (Partite)',
+        min_value=10,
+        max_value=50,
+        value=20,
+        step=5,
     )
 
-    params = COMBINAZIONI[scelta]
-
-    # FILTRAGGIO
-    mask = df_raw['GOL CASA'].notna() & df_raw['GOL OSPITE'].notna()
-    if params['SOMMA'] is not None:
-      mask &= df_raw['SOMMA'] >= params['SOMMA']
-    if params['MEDIA CASA'] is not None:
-      mask &= df_raw['MEDIA CASA'] >= params['MEDIA CASA']
-    if params['MEDIA OSPITE'] is not None:
-      mask &= df_raw['MEDIA OSPITE'] <= params['MEDIA OSPITE']
-    if params['C1'] is not None:
-      mask &= df_raw['C1'] >= params['C1']
-    if params['DC'] is not None:
-      mask &= df_raw['DC'] >= params['DC']
-
-    df = df_raw[mask].copy().reset_index(drop=True)
+    # Calcolo Esito del Mercato
+    df['WIN'] = df.apply(
+        lambda row: evaluate_market(row, mercato_scelto), axis=1
+    )
     tot_match = len(df)
 
     if tot_match >= finestra_ma:
@@ -156,7 +185,7 @@ try:
       freq_cum = (wins / tot_match) * 100
       df['MA'] = df['WIN'].rolling(window=finestra_ma).mean() * 100
 
-      # RITARDI
+      # Calcolo Ritardi
       rit_att, rit_max, curr_r = 0, 0, 0
       for res in df['WIN']:
         if res == 0:
@@ -172,33 +201,43 @@ try:
       mm_min = ma_clean.min()
       mm_max = ma_clean.max()
 
-      # METRICHE
-      st.subheader(f'Analisi: {scelta}')
+      # METRICHE IN EVIDENZA
+      st.subheader(f'Analisi Mercato: {mercato_scelto}')
       col1, col2, col3, col4, col5 = st.columns(5)
-      col1.metric('Match Totali', tot_match)
-      col2.metric('Win Rate (X)', f'{freq_cum:.1f}%')
+      col1.metric('Match Analizzati', tot_match)
+      col2.metric('Win Rate Totale', f'{freq_cum:.1f}%')
       col3.metric('Ritardo Attuale', rit_att)
-      col4.metric('Ritardo Max', rit_max)
+      col4.metric('Ritardo Max Storico', rit_max)
       col5.metric(f'MM Attuale ({finestra_ma}p)', f'{mm_att:.1f}%')
 
       col_m1, col_m2 = st.columns(2)
-      col_m1.metric('MM Minima', f'{mm_min:.1f}%')
-      col_m2.metric('MM Massima', f'{mm_max:.1f}%')
+      col_m1.metric('MM Minima Registrata', f'{mm_min:.1f}%')
+      col_m2.metric('MM Massima Registrata', f'{mm_max:.1f}%')
 
-      # GRAFICO
+      # GRAFICO ANDAMENTO
       chart_data = pd.DataFrame({
           f'Media Mobile ({finestra_ma} match)': df['MA'],
-          'Frequenza Cumulativa': freq_cum,
-          'Breakeven Quota 3.30': 30.30,
+          'Frequenza Cumulativa Totale': freq_cum,
       })
       st.line_chart(chart_data)
+
+      # TABELLA ULTIME PARTITE ANALIZZATE
+      st.subheader('📋 Ultime Partite Processate')
+      st.dataframe(
+          df[['SQUADRA CASA', 'SQUADRA OSPITE', 'GOL CASA', 'GOL OSPITE', 'WIN']]
+          .tail(15)
+          .iloc[::-1]
+      )
+
     else:
-      st.warning(f'Partite insufficienti ({tot_match}) per calcolare la MM.')
+      st.warning(
+          f'Partite insufficienti ({tot_match}) nel foglio per calcolare la MM.'
+      )
 
   else:
     st.error(
-        'Impossibile scaricare il file. Assicurati che il Foglio Google sia'
-        ' condiviso con "Chiunque abbia il link".'
+        'Impossibile leggere il file. Verifica la condivisione del Foglio'
+        ' Google.'
     )
 
 except Exception as e:
