@@ -124,6 +124,40 @@ def evaluate_market(row, market):
   return 0
 
 
+def apply_filters(df, params):
+  """Funzione ausiliaria per filtrare il DataFrame secondo i parametri della strategia."""
+  mask = pd.Series([True] * len(df))
+  somma_val = params.get("SOMMA")
+  dc_val = params.get("DC")
+  c1_val = params.get("C1")
+  c2_val = params.get("C2")
+  mc_val = params.get("MEDIA CASA")
+  mo_val = params.get("MEDIA OSPITE")
+  mo_op = params.get("MEDIA_OSPITE_OP", "<=")
+
+  if somma_val is not None and "SOMMA" in df.columns:
+    mask &= df["SOMMA"] >= somma_val
+  if dc_val is not None and "DC" in df.columns:
+    mask &= df["DC"] >= dc_val
+  if c1_val is not None and "C1" in df.columns:
+    mask &= df["C1"] >= c1_val
+  if c2_val is not None and "C2" in df.columns:
+    mask &= df["C2"] <= c2_val
+  if mc_val is not None and "MEDIA CASA" in df.columns:
+    mask &= df["MEDIA CASA"] >= mc_val
+  if mo_val is not None and "MEDIA OSPITE" in df.columns:
+    if mo_op == "<":
+      mask &= df["MEDIA OSPITE"] < mo_val
+    else:
+      mask &= df["MEDIA OSPITE"] <= mo_val
+
+  df_filtered = df[mask].copy().reset_index(drop=True)
+  df_filtered["WIN"] = df_filtered.apply(
+      lambda row: evaluate_market(row, params["MERCATO"]), axis=1
+  )
+  return df_filtered
+
+
 st.title("⚽ Dashboard Analisi xG & Mercati")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
@@ -230,7 +264,6 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "Filtro Manuale Personalizzato": "MANUALE",
     }
 
     # SELETTORE PRINCIPALE
@@ -238,27 +271,139 @@ try:
     modalita = st.sidebar.radio(
         "Scegli il tipo di analisi:",
         [
+            "🚨 Panoramica Strategie Sottoperformanti",
             "1. Mercati Singoli (Database Totale)",
             "2. Strategie xG & Filtri Salvati",
         ],
     )
 
-    df = df_base.copy()
-    titolo_analisi = ""
+    # -------------------------------------------------------------------------
+    # MODALITÀ 0: PANORAMICA SOTTOPERFORMANTE (AUTOMATICA)
+    # -------------------------------------------------------------------------
+    if "🚨" in modalita:
+      st.subheader("🚨 Report Strategie in Sottoperformance")
+      st.write(
+          "Elenco sintetico delle strategie salvate la cui **Media Mobile"
+          " recente è INFERIORE alla Media Storica Totale** o che presentano"
+          " un ritardo elevato."
+      )
+
+      finestra_alert = st.sidebar.slider(
+          "Finestra Media Mobile per Alert", 10, 50, 20, 5
+      )
+
+      alert_list = []
+      for name, params in STRATEGIE_SALVATE.items():
+        df_strat = apply_filters(df_base, params)
+        tot_strat = len(df_strat)
+
+        if tot_strat >= finestra_alert:
+          wins = df_strat["WIN"].sum()
+          win_rate_tot = (wins / tot_strat) * 100
+          quota_reale = (100 / win_rate_tot) if win_rate_tot > 0 else 0
+
+          df_strat["MA"] = df_strat["WIN"].rolling(window=finestra_alert).mean() * 100
+          mm_att = df_strat["MA"].dropna().iloc[-1]
+
+          # Calcolo Ritardo Attuale
+          rit_att = 0
+          for res in reversed(df_strat["WIN"]):
+            if res == 0:
+              rit_att += 1
+            else:
+              break
+
+          diff = mm_att - win_rate_tot
+
+          # Condizione di Sottoperformance: MM Attuale sotto il Win Rate Totale
+          if mm_att < win_rate_tot:
+            alert_list.append({
+                "Strategia": name,
+                "Mercato": params["MERCATO"],
+                "Match Totali": tot_strat,
+                "Win Rate Totale": f"{win_rate_tot:.1f}%",
+                "Quota Reale": f"{quota_reale:.2f}",
+                f"MM Attuale ({finestra_alert}p)": f"{mm_att:.1f}%",
+                "Scostamento": f"{diff:.1f}%",
+                "Ritardo Attuale": rit_att,
+            })
+
+      if alert_list:
+        df_alerts = pd.DataFrame(alert_list)
+        st.warning(
+            f"Trovate {len(alert_list)} strategie attualmente in"
+            " sottoperformance rispetto alla loro media storica:"
+        )
+        st.dataframe(df_alerts, use_container_width=True)
+      else:
+        st.success(
+            "🎉 Nessuna strategia è attualmente sotto la sua media storica!"
+        )
 
     # -------------------------------------------------------------------------
     # MODALITÀ 1: MERCATI SINGOLI SU TUTTE LE PARTITE
     # -------------------------------------------------------------------------
-    if "1." in modalita:
+    elif "1." in modalita:
       st.sidebar.markdown("---")
       st.sidebar.subheader("Mercato da Analizzare")
       mercato_scelto = st.sidebar.selectbox("Seleziona Mercato", MERCATI)
       titolo_analisi = (
           f"Analisi Mercato: {mercato_scelto} (Su tutte le partite)"
       )
+
+      df = df_base.copy()
       df["WIN"] = df.apply(
           lambda row: evaluate_market(row, mercato_scelto), axis=1
       )
+
+      finestra_ma = st.sidebar.slider(
+          "Finestra Media Mobile (Partite)", 10, 50, 20, 5
+      )
+      tot_match = len(df)
+
+      if tot_match >= finestra_ma:
+        wins = df["WIN"].sum()
+        freq_cum = (wins / tot_match) * 100
+        quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
+
+        df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
+
+        rit_att, rit_max, curr_r = 0, 0, 0
+        for res in df["WIN"]:
+          if res == 0:
+            curr_r += 1
+            if curr_r > rit_max:
+              rit_max = curr_r
+          else:
+            curr_r = 0
+        rit_att = curr_r
+
+        ma_clean = df["MA"].dropna()
+        mm_att = ma_clean.iloc[-1]
+        mm_min = ma_clean.min()
+        mm_max = ma_clean.max()
+
+        st.subheader(f"📊 {titolo_analisi}")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Match Filtrati / Totali", tot_match)
+        col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
+        col3.metric("Quota Reale", f"{quota_reale:.2f}")
+        col4.metric("Ritardo Attuale", rit_att)
+        col5.metric("Ritardo Max Storico", rit_max)
+        col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
+
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
+        col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
+
+        chart_data = pd.DataFrame({
+            f"Media Mobile ({finestra_ma} match)": df["MA"],
+            "Frequenza Cumulativa Totale": freq_cum,
+        })
+        st.line_chart(chart_data)
+
+        st.subheader("📋 Ultime Partite Processate")
+        st.dataframe(df.tail(15).iloc[::-1])
 
     # -------------------------------------------------------------------------
     # MODALITÀ 2: STRATEGIE E FILTRI xG SALVATI
@@ -266,20 +411,14 @@ try:
     else:
       st.sidebar.markdown("---")
       st.sidebar.subheader("Scegli Strategia Salvata")
-      strat_nome = st.sidebar.selectbox(
-          "Strategia con Filtri", list(STRATEGIE_SALVATE.keys())
-      )
+      strat_options = list(STRATEGIE_SALVATE.keys()) + [
+          "Filtro Manuale Personalizzato"
+      ]
+      strat_nome = st.sidebar.selectbox("Strategia con Filtri", strat_options)
 
       if strat_nome != "Filtro Manuale Personalizzato":
         params = STRATEGIE_SALVATE[strat_nome]
-        somma_val = params.get("SOMMA")
-        dc_val = params.get("DC")
-        c1_val = params.get("C1")
-        c2_val = params.get("C2")
-        mc_val = params.get("MEDIA CASA")
-        mo_val = params.get("MEDIA OSPITE")
-        mo_op = params.get("MEDIA_OSPITE_OP", "<=")
-        mercato_target = params["MERCATO"]
+        df = apply_filters(df_base, params)
         titolo_analisi = f"Strategia Salvata: {strat_nome}"
       else:
         st.sidebar.markdown("---")
@@ -341,133 +480,69 @@ try:
             if use_mo
             else None
         )
-        mo_op = "<="
 
-        titolo_analisi = f"Filtro Manuale Personalizzato - Target: {mercato_target}"
+        manual_params = {
+            "SOMMA": somma_val,
+            "DC": dc_val,
+            "C1": c1_val,
+            "C2": c2_val,
+            "MEDIA CASA": mc_val,
+            "MEDIA OSPITE": mo_val,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": mercato_target,
+        }
+        df = apply_filters(df_base, manual_params)
+        titolo_analisi = (
+            f"Filtro Manuale Personalizzato - Target: {mercato_target}"
+        )
 
-      # Applicazione dinamica e sicura dei Filtri
-      mask = pd.Series([True] * len(df))
-      if somma_val is not None and "SOMMA" in df.columns:
-        mask &= df["SOMMA"] >= somma_val
-      if dc_val is not None and "DC" in df.columns:
-        mask &= df["DC"] >= dc_val
-      if c1_val is not None and "C1" in df.columns:
-        mask &= df["C1"] >= c1_val
-      if c2_val is not None and "C2" in df.columns:
-        mask &= df["C2"] <= c2_val
-      if mc_val is not None and "MEDIA CASA" in df.columns:
-        mask &= df["MEDIA CASA"] >= mc_val
-      if mo_val is not None and "MEDIA OSPITE" in df.columns:
-        if mo_op == "<":
-          mask &= df["MEDIA OSPITE"] < mo_val
-        else:
-          mask &= df["MEDIA OSPITE"] <= mo_val
-
-      df = df[mask].copy().reset_index(drop=True)
-      df["WIN"] = df.apply(
-          lambda row: evaluate_market(row, mercato_target), axis=1
+      finestra_ma = st.sidebar.slider(
+          "Finestra Media Mobile (Partite)", 10, 50, 20, 5
       )
+      tot_match = len(df)
 
-    # -------------------------------------------------------------------------
-    # IMPOSTAZIONI E DASHBOARD
-    # -------------------------------------------------------------------------
-    st.sidebar.markdown("---")
-    finestra_ma = st.sidebar.slider(
-        "Finestra Media Mobile (Partite)",
-        min_value=10,
-        max_value=50,
-        value=20,
-        step=5,
-    )
-
-    tot_match = len(df)
-
-    if tot_match >= finestra_ma:
-      wins = df["WIN"].sum()
-      freq_cum = (wins / tot_match) * 100
-
-      # CALCOLO QUOTA REALE
-      quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
-
-      df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
-
-      rit_att, rit_max, curr_r = 0, 0, 0
-      for res in df["WIN"]:
-        if res == 0:
-          curr_r += 1
-          if curr_r > rit_max:
-            rit_max = curr_r
-        else:
-          curr_r = 0
-      rit_att = curr_r
-
-      ma_clean = df["MA"].dropna()
-      mm_att = ma_clean.iloc[-1]
-      mm_min = ma_clean.min()
-      mm_max = ma_clean.max()
-
-      # METRICHE PRINCIPALI CON QUOTA REALE ACCANTO A WIN RATE
-      st.subheader(f"📊 {titolo_analisi}")
-      col1, col2, col3, col4, col5, col6 = st.columns(6)
-      col1.metric("Match Filtrati / Totali", tot_match)
-      col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
-      col3.metric("Quota Reale", f"{quota_reale:.2f}")
-      col4.metric("Ritardo Attuale", rit_att)
-      col5.metric("Ritardo Max Storico", rit_max)
-      col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
-
-      col_m1, col_m2 = st.columns(2)
-      col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
-      col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
-
-      chart_data = pd.DataFrame({
-          f"Media Mobile ({finestra_ma} match)": df["MA"],
-          "Frequenza Cumulativa Totale": freq_cum,
-      })
-      st.line_chart(chart_data)
-
-      st.subheader("📋 Ultime Partite Processate")
-      cols_disponibili = list(df.columns)
-      cols_da_mostrare = [
-          c
-          for c in cols_disponibili
-          if any(
-              k in c.upper()
-              for k in [
-                  "CASA",
-                  "OSPITE",
-                  "SQUADRA",
-                  "MATCH",
-                  "PARTITA",
-                  "GOL",
-                  "SOMMA",
-                  "DC",
-                  "C1",
-                  "C2",
-                  "WIN",
-              ]
-          )
-      ]
-      if not cols_da_mostrare:
-        cols_da_mostrare = cols_disponibili[:6]
-
-      st.dataframe(df[cols_da_mostrare].tail(15).iloc[::-1])
-
-    else:
-      st.warning(
-          f"Partite filtrate riscontrate: {tot_match}. Servono almeno"
-          f" {finestra_ma} gare per calcolare la Media Mobile impostata."
-      )
-      if tot_match > 0:
+      if tot_match >= finestra_ma:
         wins = df["WIN"].sum()
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
-        st.write(
-            f"**Win Rate Parziale:** {freq_cum:.1f}% | **Quota Reale:**"
-            f" {quota_reale:.2f}"
-        )
-        st.subheader("📋 Partite Filtrate")
+        df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
+
+        rit_att, rit_max, curr_r = 0, 0, 0
+        for res in df["WIN"]:
+          if res == 0:
+            curr_r += 1
+            if curr_r > rit_max:
+              rit_max = curr_r
+          else:
+            curr_r = 0
+        rit_att = curr_r
+
+        ma_clean = df["MA"].dropna()
+        mm_att = ma_clean.iloc[-1]
+        mm_min = ma_clean.min()
+        mm_max = ma_clean.max()
+
+        st.subheader(f"📊 {titolo_analisi}")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Match Filtrati / Totali", tot_match)
+        col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
+        col3.metric("Quota Reale", f"{quota_reale:.2f}")
+        col4.metric("Ritardo Attuale", rit_att)
+        col5.metric("Ritardo Max Storico", rit_max)
+        col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
+
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
+        col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
+
+        chart_data = pd.DataFrame({
+            f"Media Mobile ({finestra_ma} match)": df["MA"],
+            "Frequenza Cumulativa Totale": freq_cum,
+        })
+        st.line_chart(chart_data)
+
+        st.subheader("📋 Ultime Partite Processate")
         st.dataframe(df.tail(15).iloc[::-1])
 
   else:
