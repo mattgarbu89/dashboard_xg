@@ -11,17 +11,18 @@ st.set_page_config(
 )
 
 # ==========================================
-# 'https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing'
+# LINK GOOGLE SHEETS
 # ==========================================
 LINK_GOOGLE_DRIVE = 'https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing'
 
 
-# Funzione per Convertire il Link Drive in Link di Download Diretto
+# Funzione per Convertire il Link Google Fogli/Drive in Link di Download XLSX Diretto
 def get_drive_direct_url(url):
   file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
   if file_id_match:
     file_id = file_id_match.group(1)
-    return f'https://drive.google.com/uc?export=download&id={file_id}'
+    # Esporta direttamente in formato XLSX per Google Fogli
+    return f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx'
   return url
 
 
@@ -54,11 +55,11 @@ def load_clean_df(file_bytes):
 
 st.title('⚽ Dashboard Analisi Pareggi (X)')
 
-# Pulsante per forzare l'aggiornamento manuale dei dati se necessario
+# Pulsante per forzare l'aggiornamento manuale dei dati
 if st.sidebar.button('🔄 Aggiorna Dati da Google Drive'):
   st.cache_data.clear()
 
-# Caricamento Automatico da Drive
+# Caricamento Automatico da Drive/Sheets
 direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
@@ -72,12 +73,12 @@ def fetch_data_from_drive(url):
 
 
 try:
-  with st.spinner('Lettura dati da Google Drive in corso...'):
+  with st.spinner('Lettura dati in corso...'):
     df_raw = fetch_data_from_drive(direct_url)
 
   if df_raw is not None:
     df_raw['WIN'] = (df_raw['GOL CASA'] == df_raw['GOL OSPITE']).astype(int)
-    st.success('✅ Dati collegati e aggiornati automaticamente da Google Drive!')
+    st.success('✅ Dati collegati e aggiornati automaticamente!')
 
     # COMBINAZIONI SALVATE
     COMBINAZIONI = {
@@ -196,9 +197,9 @@ try:
 
   else:
     st.error(
-        'Impossibile scaricare il file. Controlla che il link di Google Drive'
-        ' sia corretto e impostato su "Chiunque abbia il link".'
+        'Impossibile scaricare il file. Assicurati che il Foglio Google sia'
+        ' condiviso con "Chiunque abbia il link".'
     )
 
 except Exception as e:
-  st.error(f'Errore durante l\'elaborazione dei dati: {e}')
+  st.error(f"Errore durante l'elaborazione dei dati: {e}")
