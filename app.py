@@ -246,16 +246,27 @@ try:
         st.sidebar.markdown('---')
         st.sidebar.subheader('Imposta Filtri Manuali')
         mercato_target = st.sidebar.selectbox('Mercato Target', MERCATI, index=1)  # Default X
-        somma_val = st.sidebar.number_input('SOMMA Minima (es. -1.0)', value=-1.0, step=0.5)
-        dc_val = st.sidebar.number_input('DC Minima (es. 0.0)', value=0.0, step=0.5)
-        c1_val = st.sidebar.number_input('C1 Minimo (es. -1.0)', value=-1.0, step=0.5)
-        c2_val = None
-        mc_val = None
-        mo_val = None
-        titolo_analisi = (
-            f'Filtro Manuale - Target: {mercato_target} (SOMMA >= {somma_val},'
-            f' DC >= {dc_val})'
-        )
+        
+        # Abilitazione e valore per ciascun filtro (passo 0.01)
+        use_somma = st.sidebar.checkbox('Filtra per SOMMA Minima', value=True)
+        somma_val = st.sidebar.number_input('SOMMA Minima', value=-1.00, step=0.01, format="%.2f") if use_somma else None
+        
+        use_dc = st.sidebar.checkbox('Filtra per DC Minima', value=True)
+        dc_val = st.sidebar.number_input('DC Minima', value=0.00, step=0.01, format="%.2f") if use_dc else None
+        
+        use_c1 = st.sidebar.checkbox('Filtra per C1 Minimo', value=False)
+        c1_val = st.sidebar.number_input('C1 Minimo', value=-1.00, step=0.01, format="%.2f") if use_c1 else None
+        
+        use_c2 = st.sidebar.checkbox('Filtra per C2 Massimo', value=False)
+        c2_val = st.sidebar.number_input('C2 Massimo', value=4.00, step=0.01, format="%.2f") if use_c2 else None
+        
+        use_mc = st.sidebar.checkbox('Filtra per Media Casa Minima', value=False)
+        mc_val = st.sidebar.number_input('Media Casa Minima', value=1.10, step=0.01, format="%.2f") if use_mc else None
+        
+        use_mo = st.sidebar.checkbox('Filtra per Media Ospite Massima', value=False)
+        mo_val = st.sidebar.number_input('Media Ospite Massima', value=1.50, step=0.01, format="%.2f") if use_mo else None
+
+        titolo_analisi = f'Filtro Manuale Personalizzato - Target: {mercato_target}'
 
       # Applicazione dei Filtri al Database
       mask = pd.Series([True] * len(df))
