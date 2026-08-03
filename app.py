@@ -25,7 +25,7 @@ def get_drive_direct_url(url):
 
 
 def clean_numeric_column(series):
-  """Converte una colonna in numeri gestendo virgole e punti decimi."""
+  """Converte una colonna in numeri gestendo virgole e punti decimali."""
   return pd.to_numeric(
       series.astype(str).str.replace(",", "."), errors="coerce"
   )
@@ -178,7 +178,7 @@ try:
     ]
 
     # ==========================================
-    # CORREZIONE PARAMETRI STRATEGIE SALVATE
+    # STRATEGIE SALVATE
     # ==========================================
     STRATEGIE_SALVATE = {
         "1. Esito 1-1 (C2 <= 0 | Media Ospite < 1.50)": {
@@ -385,6 +385,10 @@ try:
     if tot_match >= finestra_ma:
       wins = df["WIN"].sum()
       freq_cum = (wins / tot_match) * 100
+
+      # CALCOLO QUOTA REALE
+      quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
+
       df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
 
       rit_att, rit_max, curr_r = 0, 0, 0
@@ -402,13 +406,15 @@ try:
       mm_min = ma_clean.min()
       mm_max = ma_clean.max()
 
+      # METRICHE PRINCIPALI CON QUOTA REALE ACCANTO A WIN RATE
       st.subheader(f"📊 {titolo_analisi}")
-      col1, col2, col3, col4, col5 = st.columns(5)
+      col1, col2, col3, col4, col5, col6 = st.columns(6)
       col1.metric("Match Filtrati / Totali", tot_match)
       col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
-      col3.metric("Ritardo Attuale", rit_att)
-      col4.metric("Ritardo Max Storico", rit_max)
-      col5.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
+      col3.metric("Quota Reale", f"{quota_reale:.2f}")
+      col4.metric("Ritardo Attuale", rit_att)
+      col5.metric("Ritardo Max Storico", rit_max)
+      col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
 
       col_m1, col_m2 = st.columns(2)
       col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
@@ -453,6 +459,14 @@ try:
           f" {finestra_ma} gare per calcolare la Media Mobile impostata."
       )
       if tot_match > 0:
+        wins = df["WIN"].sum()
+        freq_cum = (wins / tot_match) * 100
+        quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
+
+        st.write(
+            f"**Win Rate Parziale:** {freq_cum:.1f}% | **Quota Reale:**"
+            f" {quota_reale:.2f}"
+        )
         st.subheader("📋 Partite Filtrate")
         st.dataframe(df.tail(15).iloc[::-1])
 
