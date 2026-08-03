@@ -2,18 +2,27 @@ import io
 import re
 import zipfile
 import pandas as pd
+import requests
 import streamlit as st
 
-# Configurazione pagina Streamlit
+# Configurazione pagina
 st.set_page_config(
     page_title='Dashboard Incroci xG', page_icon='⚽', layout='wide'
 )
 
-st.title('⚽ Dashboard Analisi Pareggi (X)')
-st.write(
-    'Carica il tuo file Excel aggiornato per analizzare subito le combinazioni'
-    ' salvate.'
-)
+# ==========================================
+# https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing
+# ==========================================
+LINK_GOOGLE_DRIVE = https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing
+
+
+# Funzione per Convertire il Link Drive in Link di Download Diretto
+def get_drive_direct_url(url):
+  file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
+  if file_id_match:
+    file_id = file_id_match.group(1)
+    return f'https://drive.google.com/uc?export=download&id={file_id}'
+  return url
 
 
 # Funzione di pulizia e caricamento Excel
@@ -43,18 +52,34 @@ def load_clean_df(file_bytes):
   return pd.read_excel(output, sheet_name='INCROCI GEMINI', engine='openpyxl')
 
 
-# Caricamento file tramite pulsante nell'app
-uploaded_file = st.file_uploader(
-    'Scegli il file Excel (FILE XG MATT+ALEX...)', type=['xlsx']
-)
+st.title('⚽ Dashboard Analisi Pareggi (X)')
 
-if uploaded_file is not None:
-  try:
-    df_raw = load_clean_df(uploaded_file)
+# Pulsante per forzare l'aggiornamento manuale dei dati se necessario
+if st.sidebar.button('🔄 Aggiorna Dati da Google Drive'):
+  st.cache_data.clear()
+
+# Caricamento Automatico da Drive
+direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
+
+
+@st.cache_data(ttl=300)  # Aggiorna automaticamente i dati ogni 5 minuti
+def fetch_data_from_drive(url):
+  response = requests.get(url)
+  if response.status_code == 200:
+    return load_clean_df(io.BytesIO(response.content))
+  else:
+    return None
+
+
+try:
+  with st.spinner('Lettura dati da Google Drive in corso...'):
+    df_raw = fetch_data_from_drive(direct_url)
+
+  if df_raw is not None:
     df_raw['WIN'] = (df_raw['GOL CASA'] == df_raw['GOL OSPITE']).astype(int)
-    st.success('✅ File caricato ed elaborato con successo!')
+    st.success('✅ Dati collegati e aggiornati automaticamente da Google Drive!')
 
-    # Combinazioni salvate
+    # COMBINAZIONI SALVATE
     COMBINAZIONI = {
         '1. Opzione 2 (313 Match | SOMMA >= -1, MC >= 1.1)': {
             'SOMMA': -1.0,
@@ -98,7 +123,7 @@ if uploaded_file is not None:
         },
     }
 
-    # Sidebar per controlli
+    # SELEZIONE DALLA SIDEBAR
     st.sidebar.header('Filtri Strategia')
     scelta = st.sidebar.selectbox(
         'Seleziona Combinazione Salvata', list(COMBINAZIONI.keys())
@@ -109,7 +134,7 @@ if uploaded_file is not None:
 
     params = COMBINAZIONI[scelta]
 
-    # Filtro Dati
+    # FILTRAGGIO
     mask = df_raw['GOL CASA'].notna() & df_raw['GOL OSPITE'].notna()
     if params['SOMMA'] is not None:
       mask &= df_raw['SOMMA'] >= params['SOMMA']
@@ -130,7 +155,7 @@ if uploaded_file is not None:
       freq_cum = (wins / tot_match) * 100
       df['MA'] = df['WIN'].rolling(window=finestra_ma).mean() * 100
 
-      # Calcolo Ritardi
+      # RITARDI
       rit_att, rit_max, curr_r = 0, 0, 0
       for res in df['WIN']:
         if res == 0:
@@ -146,7 +171,7 @@ if uploaded_file is not None:
       mm_min = ma_clean.min()
       mm_max = ma_clean.max()
 
-      # Visualizzazione KPI
+      # METRICHE
       st.subheader(f'Analisi: {scelta}')
       col1, col2, col3, col4, col5 = st.columns(5)
       col1.metric('Match Totali', tot_match)
@@ -159,22 +184,21 @@ if uploaded_file is not None:
       col_m1.metric('MM Minima', f'{mm_min:.1f}%')
       col_m2.metric('MM Massima', f'{mm_max:.1f}%')
 
-      # Grafico di Linea
+      # GRAFICO
       chart_data = pd.DataFrame({
           f'Media Mobile ({finestra_ma} match)': df['MA'],
           'Frequenza Cumulativa': freq_cum,
           'Breakeven Quota 3.30': 30.30,
       })
       st.line_chart(chart_data)
-
     else:
-      st.warning(
-          f'Troppe poche partite ({tot_match}) per calcolare la media mobile.'
-      )
+      st.warning(f'Partite insufficienti ({tot_match}) per calcolare la MM.')
 
-  except Exception as e:
-    st.error(f'Errore nel caricamento del file: {e}')
-else:
-  st.info(
-      'Carica un file Excel per iniziare visualizzare la dashboard interattiva.'
-  )
+  else:
+    st.error(
+        'Impossibile scaricare il file. Controlla che il link di Google Drive'
+        ' sia corretto e impostato su "Chiunque abbia il link".'
+    )
+
+except Exception as e:
+  st.error(f'Errore durante l\'elaborazione dei dati: {e}')
