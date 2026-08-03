@@ -67,6 +67,9 @@ def load_clean_df(file_bytes):
 
 
 def evaluate_market(row, market):
+  if pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
+    return None
+
   gc = row["GOL CASA"]
   go = row["GOL OSPITE"]
   gt = gc + go
@@ -158,6 +161,57 @@ def apply_filters(df, params):
   return df_filtered
 
 
+def render_tables(df_filtered):
+  """Visualizza separatamente le prossime partite da giocare e le ultime giocate."""
+  df_played = (
+      df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
+  )
+  df_future = (
+      df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
+  )
+
+  cols_disponibili = list(df_filtered.columns)
+  cols_da_mostrare = [
+      c
+      for c in cols_disponibili
+      if any(
+          k in c.upper()
+          for k in [
+              "DATA",
+              "ORARIO",
+              "CASA",
+              "OSPITE",
+              "SQUADRA",
+              "MATCH",
+              "PARTITA",
+              "GOL",
+              "SOMMA",
+              "DC",
+              "C1",
+              "C2",
+              "WIN",
+          ]
+      )
+  ]
+  if not cols_da_mostrare:
+    cols_da_mostrare = cols_disponibili[:8]
+
+  # PROSSIME PARTITE DA GIOCARE
+  st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
+  if len(df_future) > 0:
+    cols_future = [c for c in cols_da_mostrare if c != "WIN"]
+    st.dataframe(df_future[cols_future], use_container_width=True)
+  else:
+    st.info("Nessuna prossima partita trovata per questa strategia.")
+
+  # ULTIME PARTITE PROCESSATE (GIOCATE)
+  st.subheader(f"📋 Ultime Partite Processate / Giocate ({len(df_played)})")
+  if len(df_played) > 0:
+    st.dataframe(df_played[cols_da_mostrare].tail(15).iloc[::-1], use_container_width=True)
+  else:
+    st.info("Nessuna partita giocata ancora a storico per questo filtro.")
+
+
 st.title("⚽ Dashboard Analisi xG & Mercati")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
@@ -180,10 +234,7 @@ try:
     df_raw = fetch_data_from_drive(direct_url)
 
   if df_raw is not None:
-    df_base = df_raw[
-        df_raw["GOL CASA"].notna() & df_raw["GOL OSPITE"].notna()
-    ].copy()
-    df_base.reset_index(drop=True, inplace=True)
+    df_base = df_raw.copy()
 
     MERCATI = [
         "1",
@@ -295,19 +346,21 @@ try:
       alert_list = []
       for name, params in STRATEGIE_SALVATE.items():
         df_strat = apply_filters(df_base, params)
-        tot_strat = len(df_strat)
+        df_strat_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+        tot_strat = len(df_strat_played)
 
         if tot_strat >= finestra_alert:
-          wins = df_strat["WIN"].sum()
+          wins = df_strat_played["WIN"].sum()
           win_rate_tot = (wins / tot_strat) * 100
           quota_reale = (100 / win_rate_tot) if win_rate_tot > 0 else 0
 
-          df_strat["MA"] = df_strat["WIN"].rolling(window=finestra_alert).mean() * 100
-          mm_att = df_strat["MA"].dropna().iloc[-1]
+          df_strat_played["MA"] = (
+              df_strat_played["WIN"].rolling(window=finestra_alert).mean() * 100
+          )
+          mm_att = df_strat_played["MA"].dropna().iloc[-1]
 
-          # Calcolo Ritardo Attuale
           rit_att = 0
-          for res in reversed(df_strat["WIN"]):
+          for res in reversed(df_strat_played["WIN"]):
             if res == 0:
               rit_att += 1
             else:
@@ -315,12 +368,11 @@ try:
 
           diff = mm_att - win_rate_tot
 
-          # Condizione di Sottoperformance: MM Attuale sotto il Win Rate Totale
           if mm_att < win_rate_tot:
             alert_list.append({
                 "Strategia": name,
                 "Mercato": params["MERCATO"],
-                "Match Totali": tot_strat,
+                "Match Giocati": tot_strat,
                 "Win Rate Totale": f"{win_rate_tot:.1f}%",
                 "Quota Reale": f"{quota_reale:.2f}",
                 f"MM Attuale ({finestra_alert}p)": f"{mm_att:.1f}%",
@@ -359,17 +411,20 @@ try:
       finestra_ma = st.sidebar.slider(
           "Finestra Media Mobile (Partite)", 10, 50, 20, 5
       )
-      tot_match = len(df)
+      df_played = df[df["GOL CASA"].notna()].copy()
+      tot_match = len(df_played)
 
       if tot_match >= finestra_ma:
-        wins = df["WIN"].sum()
+        wins = df_played["WIN"].sum()
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
-        df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
+        df_played["MA"] = (
+            df_played["WIN"].rolling(window=finestra_ma).mean() * 100
+        )
 
         rit_att, rit_max, curr_r = 0, 0, 0
-        for res in df["WIN"]:
+        for res in df_played["WIN"]:
           if res == 0:
             curr_r += 1
             if curr_r > rit_max:
@@ -378,14 +433,14 @@ try:
             curr_r = 0
         rit_att = curr_r
 
-        ma_clean = df["MA"].dropna()
+        ma_clean = df_played["MA"].dropna()
         mm_att = ma_clean.iloc[-1]
         mm_min = ma_clean.min()
         mm_max = ma_clean.max()
 
         st.subheader(f"📊 {titolo_analisi}")
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Match Filtrati / Totali", tot_match)
+        col1.metric("Match Giocati", tot_match)
         col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
         col3.metric("Quota Reale", f"{quota_reale:.2f}")
         col4.metric("Ritardo Attuale", rit_att)
@@ -397,13 +452,12 @@ try:
         col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
 
         chart_data = pd.DataFrame({
-            f"Media Mobile ({finestra_ma} match)": df["MA"],
+            f"Media Mobile ({finestra_ma} match)": df_played["MA"],
             "Frequenza Cumulativa Totale": freq_cum,
         })
         st.line_chart(chart_data)
 
-        st.subheader("📋 Ultime Partite Processate")
-        st.dataframe(df.tail(15).iloc[::-1])
+        render_tables(df)
 
     # -------------------------------------------------------------------------
     # MODALITÀ 2: STRATEGIE E FILTRI xG SALVATI
@@ -499,17 +553,20 @@ try:
       finestra_ma = st.sidebar.slider(
           "Finestra Media Mobile (Partite)", 10, 50, 20, 5
       )
-      tot_match = len(df)
+      df_played = df[df["GOL CASA"].notna()].copy()
+      tot_match = len(df_played)
 
       if tot_match >= finestra_ma:
-        wins = df["WIN"].sum()
+        wins = df_played["WIN"].sum()
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
-        df["MA"] = df["WIN"].rolling(window=finestra_ma).mean() * 100
+        df_played["MA"] = (
+            df_played["WIN"].rolling(window=finestra_ma).mean() * 100
+        )
 
         rit_att, rit_max, curr_r = 0, 0, 0
-        for res in df["WIN"]:
+        for res in df_played["WIN"]:
           if res == 0:
             curr_r += 1
             if curr_r > rit_max:
@@ -518,14 +575,14 @@ try:
             curr_r = 0
         rit_att = curr_r
 
-        ma_clean = df["MA"].dropna()
+        ma_clean = df_played["MA"].dropna()
         mm_att = ma_clean.iloc[-1]
         mm_min = ma_clean.min()
         mm_max = ma_clean.max()
 
         st.subheader(f"📊 {titolo_analisi}")
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Match Filtrati / Totali", tot_match)
+        col1.metric("Match Giocati", tot_match)
         col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
         col3.metric("Quota Reale", f"{quota_reale:.2f}")
         col4.metric("Ritardo Attuale", rit_att)
@@ -537,13 +594,18 @@ try:
         col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
 
         chart_data = pd.DataFrame({
-            f"Media Mobile ({finestra_ma} match)": df["MA"],
+            f"Media Mobile ({finestra_ma} match)": df_played["MA"],
             "Frequenza Cumulativa Totale": freq_cum,
         })
         st.line_chart(chart_data)
 
-        st.subheader("📋 Ultime Partite Processate")
-        st.dataframe(df.tail(15).iloc[::-1])
+        render_tables(df)
+      else:
+        st.warning(
+            f"Partite giocate riscontrate: {tot_match}. Servono almeno"
+            f" {finestra_ma} gare per i calcoli della Media Mobile."
+        )
+        render_tables(df)
 
   else:
     st.error(
