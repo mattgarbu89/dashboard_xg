@@ -67,6 +67,8 @@ def evaluate_market(row, market):
     return int(go >= gc)
   elif market == '12':
     return int(gc != go)
+  elif market == 'ESITO 1-1':
+    return int(gc == 1 and go == 1)
 
   elif market == 'OVER 1,5':
     return int(gt > 1.5)
@@ -140,6 +142,7 @@ try:
         '1X',
         'X2',
         '12',
+        'ESITO 1-1',
         'OVER 1,5',
         'OVER 2,5',
         'OVER 3,5',
@@ -159,34 +162,56 @@ try:
     ]
 
     # ==========================================
-    # LE TUE STRATEGIE CON FILTRI SALVATE
+    # LE 5 STRATEGIE FORNITE
     # ==========================================
     STRATEGIE_SALVATE = {
-        'Strategia Pareggi 1 (SOMMA >= -1 | Media Casa >= 1.1)': {
-            'SOMMA': -1.0,
+        '1. Esito 1-1 (C2 <= 0 | Media Ospite < 1.50)': {
+            'SOMMA': None,
+            'DC': None,
+            'C1': None,
+            'C2': 0.0,
+            'MEDIA CASA': None,
+            'MEDIA OSPITE': 1.50,
+            'MEDIA_OSPITE_OP': '<',
+            'MERCATO': 'ESITO 1-1',
+        },
+        '2. Under 2,5 Ospite (C2 <= -4)': {
+            'SOMMA': None,
+            'DC': None,
+            'C1': None,
+            'C2': -4.0,
+            'MEDIA CASA': None,
+            'MEDIA OSPITE': None,
+            'MERCATO': 'UNDER 2,5 OSPITE',
+        },
+        '3. Esito X - Base (Somma >= -1.03 | Media Ospite <= -1.54)': {
+            'SOMMA': -1.03,
             'DC': None,
             'C1': None,
             'C2': None,
-            'MEDIA CASA': 1.1,
-            'MEDIA OSPITE': None,
+            'MEDIA CASA': None,
+            'MEDIA OSPITE': -1.54,
+            'MEDIA_OSPITE_OP': '<=',
             'MERCATO': 'X',
         },
-        'Strategia Pareggi Gold (SOMMA >= -0.5 | DC >= 0)': {
-            'SOMMA': -0.5,
-            'DC': 0.0,
+        '4. Esito X - Gold (Somma >= -0.79 | Media Casa >= 1.1 | Media Ospite <= 1.51)': {
+            'SOMMA': -0.79,
+            'DC': None,
             'C1': None,
             'C2': None,
             'MEDIA CASA': 1.1,
             'MEDIA OSPITE': 1.51,
+            'MEDIA_OSPITE_OP': '<=',
             'MERCATO': 'X',
         },
-        'Strategia Stabilità (C1 >= -1 | Media Ospite <= 1.7)': {
+        '5. Esito X - Stabilità (C1 >= -1.02 | DC >= 0.62 | Media Ospite <= 1.51)': {
             'SOMMA': None,
-            'DC': None,
-            'C1': -1.0,
+            'DC': 0.62,
+            'C1': -1.02,
             'C2': None,
             'MEDIA CASA': None,
-            'MEDIA OSPITE': 1.7,
+            'MEDIA OSPITE': 1.51,
+            'MEDIA_OSPITE_OP': '<=',
             'MERCATO': 'X',
         },
         'Filtro Manuale Personalizzato': 'MANUALE',
@@ -232,12 +257,13 @@ try:
       # Se sceglie una strategia salvata preimpostata
       if strat_nome != 'Filtro Manuale Personalizzato':
         params = STRATEGIE_SALVATE[strat_nome]
-        somma_val = params['SOMMA']
-        dc_val = params['DC']
-        c1_val = params['C1']
-        c2_val = params['C2']
-        mc_val = params['MEDIA CASA']
-        mo_val = params['MEDIA OSPITE']
+        somma_val = params.get('SOMMA')
+        dc_val = params.get('DC')
+        c1_val = params.get('C1')
+        c2_val = params.get('C2')
+        mc_val = params.get('MEDIA CASA')
+        mo_val = params.get('MEDIA OSPITE')
+        mo_op = params.get('MEDIA_OSPITE_OP', '<=')
         mercato_target = params['MERCATO']
         titolo_analisi = f'Strategia Salvata: {strat_nome}'
 
@@ -245,26 +271,62 @@ try:
       else:
         st.sidebar.markdown('---')
         st.sidebar.subheader('Imposta Filtri Manuali')
-        mercato_target = st.sidebar.selectbox('Mercato Target', MERCATI, index=1)  # Default X
-        
-        # Abilitazione e valore per ciascun filtro (passo 0.01)
-        use_somma = st.sidebar.checkbox('Filtra per SOMMA Minima', value=True)
-        somma_val = st.sidebar.number_input('SOMMA Minima', value=-1.00, step=0.01, format="%.2f") if use_somma else None
-        
-        use_dc = st.sidebar.checkbox('Filtra per DC Minima', value=True)
-        dc_val = st.sidebar.number_input('DC Minima', value=0.00, step=0.01, format="%.2f") if use_dc else None
-        
+        mercato_target = st.sidebar.selectbox('Mercato Target', MERCATI, index=1)
+
+        use_somma = st.sidebar.checkbox('Filtra per SOMMA Minima', value=False)
+        somma_val = (
+            st.sidebar.number_input(
+                'SOMMA Minima', value=-1.00, step=0.01, format='%.2f'
+            )
+            if use_somma
+            else None
+        )
+
+        use_dc = st.sidebar.checkbox('Filtra per DC Minima', value=False)
+        dc_val = (
+            st.sidebar.number_input(
+                'DC Minima', value=0.00, step=0.01, format='%.2f'
+            )
+            if use_dc
+            else None
+        )
+
         use_c1 = st.sidebar.checkbox('Filtra per C1 Minimo', value=False)
-        c1_val = st.sidebar.number_input('C1 Minimo', value=-1.00, step=0.01, format="%.2f") if use_c1 else None
-        
+        c1_val = (
+            st.sidebar.number_input(
+                'C1 Minimo', value=-1.00, step=0.01, format='%.2f'
+            )
+            if use_c1
+            else None
+        )
+
         use_c2 = st.sidebar.checkbox('Filtra per C2 Massimo', value=False)
-        c2_val = st.sidebar.number_input('C2 Massimo', value=4.00, step=0.01, format="%.2f") if use_c2 else None
-        
+        c2_val = (
+            st.sidebar.number_input(
+                'C2 Massimo', value=0.00, step=0.01, format='%.2f'
+            )
+            if use_c2
+            else None
+        )
+
         use_mc = st.sidebar.checkbox('Filtra per Media Casa Minima', value=False)
-        mc_val = st.sidebar.number_input('Media Casa Minima', value=1.10, step=0.01, format="%.2f") if use_mc else None
-        
-        use_mo = st.sidebar.checkbox('Filtra per Media Ospite Massima', value=False)
-        mo_val = st.sidebar.number_input('Media Ospite Massima', value=1.50, step=0.01, format="%.2f") if use_mo else None
+        mc_val = (
+            st.sidebar.number_input(
+                'Media Casa Minima', value=1.10, step=0.01, format='%.2f'
+            )
+            if use_mc
+            else None
+        )
+
+        use_mo = st.sidebar.checkbox('Filtra per Media Ospite', value=False)
+        mo_val = (
+            st.sidebar.number_input(
+                'Media Ospite Soglia', value=1.50, step=0.01, format='%.2f'
+            )
+            if use_mo
+            else None
+        )
+        mo_op = '<='  # Default manuale
 
         titolo_analisi = f'Filtro Manuale Personalizzato - Target: {mercato_target}'
 
@@ -281,7 +343,10 @@ try:
       if mc_val is not None and 'MEDIA CASA' in df.columns:
         mask &= df['MEDIA CASA'] >= mc_val
       if mo_val is not None and 'MEDIA OSPITE' in df.columns:
-        mask &= df['MEDIA OSPITE'] <= mo_val
+        if mo_op == '<':
+          mask &= df['MEDIA OSPITE'] < mo_val
+        else:
+          mask &= df['MEDIA OSPITE'] <= mo_val
 
       df = df[mask].copy().reset_index(drop=True)
       df['WIN'] = df.apply(
