@@ -63,6 +63,16 @@ def load_clean_df(file_bytes):
     if col in df.columns:
       df[col] = clean_numeric_column(df[col])
 
+  # Formattazione e pulizia delle colonne Data e Orario
+  for col in df.columns:
+    if "DATA" in col.upper():
+      # Estrae solo la parte data senza orario
+      df[col] = (
+          pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
+      ).fillna(df[col])
+    elif any(k in col.upper() for k in ["ORA", "ORARIO"]):
+      df[col] = df[col].astype(str).str.replace("00:00:00", "").str.strip()
+
   return df
 
 
@@ -178,6 +188,7 @@ def render_tables(df_filtered):
           k in c.upper()
           for k in [
               "DATA",
+              "ORA",
               "ORARIO",
               "CASA",
               "OSPITE",
@@ -199,7 +210,9 @@ def render_tables(df_filtered):
   # PROSSIME PARTITE DA GIOCARE
   st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
   if len(df_future) > 0:
-    cols_future = [c for c in cols_da_mostrare if c != "WIN"]
+    cols_future = [
+        c for c in cols_da_mostrare if c not in ["WIN", "GOL CASA", "GOL OSPITE"]
+    ]
     st.dataframe(df_future[cols_future], use_container_width=True)
   else:
     st.info("Nessuna prossima partita trovata per questa strategia.")
@@ -207,7 +220,9 @@ def render_tables(df_filtered):
   # ULTIME PARTITE PROCESSATE (GIOCATE)
   st.subheader(f"📋 Ultime Partite Processate / Giocate ({len(df_played)})")
   if len(df_played) > 0:
-    st.dataframe(df_played[cols_da_mostrare].tail(15).iloc[::-1], use_container_width=True)
+    st.dataframe(
+        df_played[cols_da_mostrare].tail(15).iloc[::-1], use_container_width=True
+    )
   else:
     st.info("Nessuna partita giocata ancora a storico per questo filtro.")
 
