@@ -7,7 +7,7 @@ import streamlit as st
 
 # Configurazione pagina
 st.set_page_config(
-    page_title='Dashboard Analisi Mercati xG', page_icon='⚽', layout='wide'
+    page_title='Dashboard Strategie & Filtri xG', page_icon='⚽', layout='wide'
 )
 
 # ==========================================
@@ -16,7 +16,6 @@ st.set_page_config(
 LINK_GOOGLE_DRIVE = 'https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing'
 
 
-# Funzione per Convertire il Link Google Fogli in Download XLSX Diretto
 def get_drive_direct_url(url):
   file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
   if file_id_match:
@@ -25,7 +24,6 @@ def get_drive_direct_url(url):
   return url
 
 
-# Funzione di pulizia e caricamento Excel
 def load_clean_df(file_bytes):
   output = io.BytesIO()
   with zipfile.ZipFile(file_bytes, 'r') as zin:
@@ -52,7 +50,6 @@ def load_clean_df(file_bytes):
   return pd.read_excel(output, sheet_name='INCROCI GEMINI', engine='openpyxl')
 
 
-# Funzione per determinare l'esito del mercato
 def evaluate_market(row, market):
   gc = row['GOL CASA']
   go = row['GOL OSPITE']
@@ -109,16 +106,15 @@ def evaluate_market(row, market):
   return 0
 
 
-st.title('⚽ Dashboard Analisi Tutti i Mercati')
+st.title('⚽ Dashboard Analisi xG & Mercati')
 
-# Pulsante per forzare l'aggiornamento dei dati
 if st.sidebar.button('🔄 Aggiorna Dati da Google Drive'):
   st.cache_data.clear()
 
 direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
-@st.cache_data(ttl=300)  # Aggiorna automaticamente i dati ogni 5 minuti
+@st.cache_data(ttl=300)
 def fetch_data_from_drive(url):
   response = requests.get(url)
   if response.status_code == 200:
@@ -132,13 +128,11 @@ try:
     df_raw = fetch_data_from_drive(direct_url)
 
   if df_raw is not None:
-    # Filtriamo solo le partite con punteggio presente
-    df = df_raw[
+    df_base = df_raw[
         df_raw['GOL CASA'].notna() & df_raw['GOL OSPITE'].notna()
     ].copy()
-    df.reset_index(drop=True, inplace=True)
+    df_base.reset_index(drop=True, inplace=True)
 
-    # SELEZIONE MERCATI DALLA SIDEBAR
     MERCATI = [
         '1',
         'X',
@@ -164,8 +158,129 @@ try:
         'UNDER 2,5 OSPITE',
     ]
 
-    st.sidebar.header('Seleziona Analisi')
-    mercato_scelto = st.sidebar.selectbox('Mercato da Analizzare', MERCATI)
+    # ==========================================
+    # LE TUE STRATEGIE CON FILTRI SALVATE
+    # ==========================================
+    STRATEGIE_SALVATE = {
+        'Strategia Pareggi 1 (SOMMA >= -1 | Media Casa >= 1.1)': {
+            'SOMMA': -1.0,
+            'DC': None,
+            'C1': None,
+            'C2': None,
+            'MEDIA CASA': 1.1,
+            'MEDIA OSPITE': None,
+            'MERCATO': 'X',
+        },
+        'Strategia Pareggi Gold (SOMMA >= -0.5 | DC >= 0)': {
+            'SOMMA': -0.5,
+            'DC': 0.0,
+            'C1': None,
+            'C2': None,
+            'MEDIA CASA': 1.1,
+            'MEDIA OSPITE': 1.51,
+            'MERCATO': 'X',
+        },
+        'Strategia Stabilità (C1 >= -1 | Media Ospite <= 1.7)': {
+            'SOMMA': None,
+            'DC': None,
+            'C1': -1.0,
+            'C2': None,
+            'MEDIA CASA': None,
+            'MEDIA OSPITE': 1.7,
+            'MERCATO': 'X',
+        },
+        'Filtro Manuale Personalizzato': 'MANUALE',
+    }
+
+    # SELETTORE PRINCIPALE
+    st.sidebar.header('📌 SELEZIONA MODALITÀ')
+    modalita = st.sidebar.radio(
+        'Scegli il tipo di analisi:',
+        [
+            '1. Mercati Singoli (Database Totale)',
+            '2. Strategie xG & Filtri Salvati',
+        ],
+    )
+
+    df = df_base.copy()
+    titolo_analisi = ''
+
+    # -------------------------------------------------------------------------
+    # MODALITÀ 1: MERCATI SINGOLI SU TUTTE LE PARTITE
+    # -------------------------------------------------------------------------
+    if '1.' in modalita:
+      st.sidebar.markdown('---')
+      st.sidebar.subheader('Mercato da Analizzare')
+      mercato_scelto = st.sidebar.selectbox('Seleziona Mercato', MERCATI)
+      titolo_analisi = (
+          f'Analisi Mercato: {mercato_scelto} (Su tutte le partite)'
+      )
+      df['WIN'] = df.apply(
+          lambda row: evaluate_market(row, mercato_scelto), axis=1
+      )
+
+    # -------------------------------------------------------------------------
+    # MODALITÀ 2: STRATEGIE E FILTRI xG SALVATI
+    # -------------------------------------------------------------------------
+    else:
+      st.sidebar.markdown('---')
+      st.sidebar.subheader('Scegli Strategia Salvata')
+      strat_nome = st.sidebar.selectbox(
+          'Strategia con Filtri', list(STRATEGIE_SALVATE.keys())
+      )
+
+      # Se sceglie una strategia salvata preimpostata
+      if strat_nome != 'Filtro Manuale Personalizzato':
+        params = STRATEGIE_SALVATE[strat_nome]
+        somma_val = params['SOMMA']
+        dc_val = params['DC']
+        c1_val = params['C1']
+        c2_val = params['C2']
+        mc_val = params['MEDIA CASA']
+        mo_val = params['MEDIA OSPITE']
+        mercato_target = params['MERCATO']
+        titolo_analisi = f'Strategia Salvata: {strat_nome}'
+
+      # Se sceglie il Filtro Manuale Personalizzato
+      else:
+        st.sidebar.markdown('---')
+        st.sidebar.subheader('Imposta Filtri Manuali')
+        mercato_target = st.sidebar.selectbox('Mercato Target', MERCATI, index=1)  # Default X
+        somma_val = st.sidebar.number_input('SOMMA Minima (es. -1.0)', value=-1.0, step=0.5)
+        dc_val = st.sidebar.number_input('DC Minima (es. 0.0)', value=0.0, step=0.5)
+        c1_val = st.sidebar.number_input('C1 Minimo (es. -1.0)', value=-1.0, step=0.5)
+        c2_val = None
+        mc_val = None
+        mo_val = None
+        titolo_analisi = (
+            f'Filtro Manuale - Target: {mercato_target} (SOMMA >= {somma_val},'
+            f' DC >= {dc_val})'
+        )
+
+      # Applicazione dei Filtri al Database
+      mask = pd.Series([True] * len(df))
+      if somma_val is not None and 'SOMMA' in df.columns:
+        mask &= df['SOMMA'] >= somma_val
+      if dc_val is not None and 'DC' in df.columns:
+        mask &= df['DC'] >= dc_val
+      if c1_val is not None and 'C1' in df.columns:
+        mask &= df['C1'] >= c1_val
+      if c2_val is not None and 'C2' in df.columns:
+        mask &= df['C2'] <= c2_val
+      if mc_val is not None and 'MEDIA CASA' in df.columns:
+        mask &= df['MEDIA CASA'] >= mc_val
+      if mo_val is not None and 'MEDIA OSPITE' in df.columns:
+        mask &= df['MEDIA OSPITE'] <= mo_val
+
+      df = df[mask].copy().reset_index(drop=True)
+      df['WIN'] = df.apply(
+          lambda row: evaluate_market(row, mercato_target), axis=1
+      )
+
+    # -------------------------------------------------------------------------
+    # IMPOSTAZIONI MEDIA MOBILE E DASHBOARD
+    # -------------------------------------------------------------------------
+    st.sidebar.markdown('---')
     finestra_ma = st.sidebar.slider(
         'Finestra Media Mobile (Partite)',
         min_value=10,
@@ -174,10 +289,6 @@ try:
         step=5,
     )
 
-    # Calcolo Esito del Mercato
-    df['WIN'] = df.apply(
-        lambda row: evaluate_market(row, mercato_scelto), axis=1
-    )
     tot_match = len(df)
 
     if tot_match >= finestra_ma:
@@ -201,10 +312,10 @@ try:
       mm_min = ma_clean.min()
       mm_max = ma_clean.max()
 
-      # METRICHE IN EVIDENZA
-      st.subheader(f'Analisi Mercato: {mercato_scelto}')
+      # VISUALIZZAZIONE METRICHE
+      st.subheader(f'📊 {titolo_analisi}')
       col1, col2, col3, col4, col5 = st.columns(5)
-      col1.metric('Match Analizzati', tot_match)
+      col1.metric('Match Filtrati / Totali', tot_match)
       col2.metric('Win Rate Totale', f'{freq_cum:.1f}%')
       col3.metric('Ritardo Attuale', rit_att)
       col4.metric('Ritardo Max Storico', rit_max)
@@ -214,21 +325,18 @@ try:
       col_m1.metric('MM Minima Registrata', f'{mm_min:.1f}%')
       col_m2.metric('MM Massima Registrata', f'{mm_max:.1f}%')
 
-      # GRAFICO ANDAMENTO
+      # GRAFICO
       chart_data = pd.DataFrame({
           f'Media Mobile ({finestra_ma} match)': df['MA'],
           'Frequenza Cumulativa Totale': freq_cum,
       })
       st.line_chart(chart_data)
 
-      # TABELLA ULTIME PARTITE ANALIZZATE (GESTIONE DINAMICA DELLE COLONNE)
+      # TABELLA ULTIME PARTITE
       st.subheader('📋 Ultime Partite Processate')
-
-      # Rileva automaticamente le colonne disponibili per la tabella
       cols_disponibili = list(df.columns)
       cols_da_mostrare = []
 
-      # Cerca colonne squadre o informazioni utili
       for c in cols_disponibili:
         if any(
             k in c.upper()
@@ -239,19 +347,24 @@ try:
                 'MATCH',
                 'PARTITA',
                 'GOL',
+                'SOMMA',
+                'DC',
+                'C1',
+                'C2',
                 'WIN',
             ]
         ):
           cols_da_mostrare.append(c)
 
       if not cols_da_mostrare:
-        cols_da_mostrare = cols_disponibili[:5]
+        cols_da_mostrare = cols_disponibili[:6]
 
       st.dataframe(df[cols_da_mostrare].tail(15).iloc[::-1])
 
     else:
       st.warning(
-          f'Partite insufficienti ({tot_match}) nel foglio per calcolare la MM.'
+          f'Partite insufficienti ({tot_match}) con questi criteri per'
+          f' calcolare la Media Mobile da {finestra_ma} gare.'
       )
 
   else:
