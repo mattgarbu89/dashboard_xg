@@ -365,7 +365,7 @@ def apply_filters(df, params):
 
 
 def calculate_delays(win_series):
-    """Calcola il ritardo attuale e il ritardo massimo (consecutive losses)"""
+    """Calcola il ritardoattuale e il ritardo massimo (consecutive losses)"""
     current_delay = 0
     max_delay = 0
     temp_delay = 0
@@ -665,16 +665,48 @@ try:
 
             st.subheader(f"📊 {strat_nome}")
 
-            # BLOCCO METRICHE PULITO (SENZA FRECCE COLORATE E SENZA TABELLE)
-            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE (NESSUN TESTO TAGLIATO)
+            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            with r1_c1:
+                with st.container(border=True):
+                    st.caption("Match Totali Giocati")
+                    st.markdown(f"### {tot_match}")
 
-            col1.metric("Match Totali", f"{tot_match}")
-            col2.metric("Win Rate Reale", f"{str(round(win_rate_reale, 2)).replace('.', ',')}%")
-            col3.metric("Quota Fair", f"{str(round(quota_limite, 2)).replace('.', ',')}")
-            col4.metric("Ritardo Attuale", f"{current_delay}")
-            col5.metric("Ritardo Max", f"{max_delay}")
-            col6.metric(f"MM Att. ({finestra_ma}p)", f"{str(round(mm_att, 1)).replace('.', ',')}%")
-            col7.metric(f"MM Min / Max", f"{str(round(mm_min, 1)).replace('.', ',')}% / {str(round(mm_max, 1)).replace('.', ',')}%")
+            with r1_c2:
+                with st.container(border=True):
+                    st.caption("Win Rate Reale (%)")
+                    st.markdown(f"### {str(round(win_rate_reale, 2)).replace('.', ',')}%")
+
+            with r1_c3:
+                with st.container(border=True):
+                    st.caption("Quota Fair / Limite")
+                    st.markdown(f"### {str(round(quota_limite, 2)).replace('.', ',')}")
+
+            with r1_c4:
+                with st.container(border=True):
+                    st.caption("Ritardo Attuale (Match)")
+                    st.markdown(f"### {current_delay}")
+
+            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+            with r2_c1:
+                with st.container(border=True):
+                    st.caption("Ritardo Max Storico (Match)")
+                    st.markdown(f"### {max_delay}")
+
+            with r2_c2:
+                with st.container(border=True):
+                    st.caption(f"MM Attuale ({finestra_ma} match)")
+                    st.markdown(f"### {str(round(mm_att, 1)).replace('.', ',')}%")
+
+            with r2_c3:
+                with st.container(border=True):
+                    st.caption(f"MM Minima ({finestra_ma} match)")
+                    st.markdown(f"### {str(round(mm_min, 1)).replace('.', ',')}%")
+
+            with r2_c4:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma} match)")
+                    st.markdown(f"### {str(round(mm_max, 1)).replace('.', ',')}%")
 
             st.markdown("---")
 
