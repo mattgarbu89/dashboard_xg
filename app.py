@@ -524,23 +524,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
 st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
 
-st.sidebar.header("🔑 Configurazione Odds API")
-api_key = st.sidebar.text_input(
-    "API Key:",
-    value=ODDS_API_KEY_DEFAULT,
-    type="password",
-)
-
-odds_dataset = fetch_all_active_odds(api_key) if api_key else []
-
-if len(odds_dataset) > 0:
-    st.sidebar.success(f"Quote API Connesse ({len(odds_dataset)} match salvati)")
-else:
-    st.sidebar.warning("Nessuna quota scaricata. Verifica API Key o disponibilità match.")
-
-if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
-    st.cache_data.clear()
-
 direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
@@ -558,16 +541,6 @@ try:
 
     if df_raw is not None:
         df_base = df_raw.copy()
-
-        col_casa_auto, col_ospite_auto = detect_team_columns(df_base)
-        st.sidebar.header("📌 Selezione Colonne Squadre")
-        all_cols = list(df_base.columns)
-        
-        idx_casa = all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
-        idx_ospite = all_cols.index(col_ospite_auto) if col_ospite_auto in all_cols else (1 if len(all_cols) > 1 else 0)
-
-        col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
-        col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
 
         STRATEGIE_SALVATE = {
             "Esito X super combo 235 match 37.45%": {
@@ -597,7 +570,13 @@ try:
         }
 
         ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
+        strat_map = {item["nome"]: item for item in ranked_strategies}
 
+        # --- SIDEBAR - SELEZIONI IN ALTO ---
+        st.sidebar.header("🎯 SELEZIONA STRATEGIA")
+        strat_nome = st.sidebar.selectbox("Strategia attiva:", list(strat_map.keys()))
+
+        st.sidebar.markdown("---")
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
@@ -607,6 +586,36 @@ try:
             ],
         )
 
+        st.sidebar.markdown("---")
+        st.sidebar.header("🔑 Configurazione Odds API")
+        api_key = st.sidebar.text_input(
+            "API Key:",
+            value=ODDS_API_KEY_DEFAULT,
+            type="password",
+        )
+
+        odds_dataset = fetch_all_active_odds(api_key) if api_key else []
+
+        if len(odds_dataset) > 0:
+            st.sidebar.success(f"Quote API Connesse ({len(odds_dataset)} match salvati)")
+        else:
+            st.sidebar.warning("Nessuna quota scaricata. Verifica API Key o disponibilità match.")
+
+        if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
+            st.cache_data.clear()
+
+        col_casa_auto, col_ospite_auto = detect_team_columns(df_base)
+        st.sidebar.markdown("---")
+        st.sidebar.header("📌 Selezione Colonne Squadre")
+        all_cols = list(df_base.columns)
+        
+        idx_casa = all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
+        idx_ospite = all_cols.index(col_ospite_auto) if col_ospite_auto in all_cols else (1 if len(all_cols) > 1 else 0)
+
+        col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
+        col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
+
+        # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
             st.subheader("🚨 Report Strategie: Sottoperformance & Bounce Back")
 
@@ -677,10 +686,6 @@ try:
                 st.info("Tutte le strategie stabili sopra la media target.")
 
         else:
-            st.sidebar.markdown("---")
-            strat_map = {item["nome"]: item for item in ranked_strategies}
-            strat_nome = st.sidebar.selectbox("Scegli Strategia da Analizzare", list(strat_map.keys()))
-
             selected_item = strat_map[strat_nome]
             params = selected_item["params"]
             win_rate_storico = selected_item["win_rate_storico"]
@@ -694,6 +699,7 @@ try:
 
             current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
 
+            st.sidebar.markdown("---")
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
 
             mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
@@ -715,7 +721,7 @@ try:
 
             st.markdown("#### 📈 Metriche Principali")
 
-            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE (NESSUN TESTO TAGLIATO)
+            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1:
                 with st.container(border=True):
