@@ -167,30 +167,32 @@ def fuzzy_single_team(t1, t2):
     if c1 == c2:
         return True
 
-    words1 = c1.split()
-    words2 = c2.split()
+    words1 = set(c1.split())
+    words2 = set(c2.split())
 
-    # Se una ha un suffisso distintivo come 'sp' (Botafogo SP vs Botafogo RJ)
-    if ('sp' in words1 and 'sp' not in words2) or ('sp' in words2 and 'sp' not in words1):
+    # Gestione specifica Botafogo SP / RJ / MG / PR
+    suffixes = {"sp", "rj", "mg", "pr"}
+    s1 = words1.intersection(suffixes)
+    s2 = words2.intersection(suffixes)
+    if s1 and not s2:
+        return False
+    if s2 and not s1:
+        return False
+    if s1 and s2 and s1 != s2:
         return False
 
-    # Controllo sulla prima parola chiave (es. Derry vs York, Sligo vs Bristol)
-    main_word1 = words1[0] if words1 else ""
-    main_word2 = words2[0] if words2 else ""
+    # Rimozione parole generiche per evitare false sovrapposizioni (es. Derry City vs York City)
+    generic = {"city", "rovers", "united", "town", "athletic", "sporting", "fc", "sc", "union"}
+    unique1 = " ".join([w for w in words1 if w not in generic])
+    unique2 = " ".join([w for w in words2 if w not in generic])
 
-    generic_words = ["city", "united", "town", "rovers", "athletic", "sporting", "fc", "real", "union", "deportes", "universidad"]
-    
-    if main_word1 not in generic_words and main_word2 not in generic_words:
-        if len(main_word1) >= 3 and len(main_word2) >= 3:
-            ratio_main = difflib.SequenceMatcher(None, main_word1, main_word2).ratio()
-            if ratio_main < 0.65 and main_word1 not in main_word2 and main_word2 not in main_word1:
-                return False
-
-    if len(c1) <= 4 or len(c2) <= 4:
-        return c1 == c2 or c1 in words2 or c2 in words1
+    if unique1 and unique2:
+        r_unq = difflib.SequenceMatcher(None, unique1, unique2).ratio()
+        if r_unq < 0.40 and unique1 not in unique2 and unique2 not in unique1:
+            return False
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.50
+    return ratio >= 0.45 or c1 in c2 or c2 in c1
 
 
 def is_match_pair(h1, a1, h2, a2):
