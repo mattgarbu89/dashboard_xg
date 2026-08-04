@@ -87,7 +87,6 @@ def detect_team_columns(df):
             col_ospite = c
 
     if not col_casa or not col_ospite:
-        # Fallback: cerca nelle prime colonne stringhe che non siano numeri o date
         text_cols = [c for c in df.columns if df[c].dtype == "object" or df[c].dtype == "string"]
         for c in text_cols:
             c_clean = str(c).upper().strip()
@@ -96,7 +95,6 @@ def detect_team_columns(df):
             elif not col_ospite and any(x in c_clean for x in ["OSPITE", "TRASFERTA", "AWAY"]) and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI", "QUOTA"]):
                 col_ospite = c
 
-    # Se ancora non trovate, assegna le prime due colonne di testo
     if not col_casa or not col_ospite:
         string_cols = []
         for c in df.columns:
@@ -107,8 +105,24 @@ def detect_team_columns(df):
         if len(string_cols) >= 2:
             col_casa = col_casa or string_cols[0]
             col_ospite = col_ospite or string_cols[1]
+        elif len(string_cols) == 1:
+            col_casa = col_casa or string_cols[0]
+            col_ospite = col_ospite or string_cols[0]
 
     return col_casa, col_ospite
+
+
+def split_teams_if_combined(val_casa, val_ospite):
+    s_casa = str(val_casa).strip() if pd.notna(val_casa) else ""
+    s_ospite = str(val_ospite).strip() if pd.notna(val_ospite) else ""
+
+    if s_casa == s_ospite or not s_ospite or s_ospite == "nan":
+        for sep in [" - ", " vs ", " v ", " -"]:
+            if sep in s_casa:
+                parts = s_casa.split(sep, 1)
+                return parts[0].strip(), parts[1].strip()
+
+    return s_casa, s_ospite
 
 
 def clean_team_name(name):
@@ -116,7 +130,7 @@ def clean_team_name(name):
         return ""
     text = str(name).lower().strip()
     text = re.sub(r"[^\w\s]", "", text)
-    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st"]
+    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st", "city", "utd", "united", "town"]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
@@ -126,15 +140,16 @@ def fuzzy_match_teams(t1, t2):
     c2 = clean_team_name(t2)
     if not c1 or not c2:
         return False
-    if c1 in c2 or c2 in c1:
+
+    if c1 == c2:
         return True
-    
-    words1 = set(c1.split())
-    words2 = set(c2.split())
-    if len(words1.intersection(words2)) > 0:
-        return True
-        
-    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.45
+
+    if len(c1) >= 4 and len(c2) >= 4:
+        if c1 in c2 or c2 in c1:
+            return True
+
+    ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
+    return ratio >= 0.65
 
 
 @st.cache_data(ttl=1800)
@@ -157,7 +172,7 @@ def fetch_all_active_odds(api_key):
         ]
 
     all_odds = []
-    for key in soccer_keys[:25]:
+    for key in soccer_keys[:30]:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
@@ -230,11 +245,13 @@ def match_odds(home_team, away_team, market_target, odds_data):
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None
 
+    h_clean, a_clean = split_teams_if_combined(home_team, away_team)
+
     for event in odds_data:
         ev_home = event.get("home_team", "")
         ev_away = event.get("away_team", "")
 
-        if fuzzy_match_teams(home_team, ev_home) and fuzzy_match_teams(away_team, ev_away):
+        if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
             return extract_best_odd(event, market_target)
 
     return None
@@ -385,7 +402,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
         if col_casa and col_casa in df_future.columns and col_casa not in cols_finali:
             cols_finali.append(col_casa)
-        if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali:
+        if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali and col_ospite != col_casa:
             cols_finali.append(col_ospite)
 
         cols_finali.extend(["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"])
@@ -449,7 +466,6 @@ try:
     if df_raw is not None:
         df_base = df_raw.copy()
 
-        # Selezione manuale/automatica delle colonne Squadra
         col_casa_auto, col_ospite_auto = detect_team_columns(df_base)
         st.sidebar.header("📌 Selezione Colonne Squadre")
         all_cols = list(df_base.columns)
@@ -457,18 +473,19 @@ try:
         idx_casa = all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
         idx_ospite = all_cols.index(col_ospite_auto) if col_ospite_auto in all_cols else (1 if len(all_cols) > 1 else 0)
 
-        col_casa = st.sidebar.selectbox("Colonna Squadra Casa:", all_cols, index=idx_casa)
+        col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
         col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
 
         if st.sidebar.button("🔎 Esegui Diagnostica Matching"):
             df_future_diag = df_base[df_base["GOL CASA"].isna()].copy()
-            # Rimuove righe dove entrambe le squadre sono nulle
-            df_future_diag = df_future_diag.dropna(subset=[col_casa, col_ospite], how="all")
+            df_future_diag = df_future_diag.dropna(subset=[col_casa], how="all")
             
             diag_results = []
             for _, r in df_future_diag.iterrows():
-                h_team = str(r.get(col_casa, "")).strip()
-                a_team = str(r.get(col_ospite, "")).strip()
+                v_casa = r.get(col_casa, "")
+                v_ospite = r.get(col_ospite, "")
+                
+                h_team, a_team = split_teams_if_combined(v_casa, v_ospite)
                 
                 if not h_team or h_team == "nan" or not a_team or a_team == "nan":
                     continue
@@ -485,8 +502,8 @@ try:
                         break
                 
                 diag_results.append({
-                    "Squadra Casa (Foglio)": h_team,
-                    "Squadra Ospite (Foglio)": a_team,
+                    "Squadra Casa (Splittata)": h_team,
+                    "Squadra Ospite (Splittata)": a_team,
                     "Esito Match API": found_match,
                     "Match Corrispondente API": matched_with
                 })
