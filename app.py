@@ -13,9 +13,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# ==========================================
-# CONFIGURAZIONE E COSTANTI
-# ==========================================
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
 ODDS_API_KEY_DEFAULT = "1eb2407df0cb3fee45c56827ba2610d2"
 
@@ -63,11 +60,11 @@ def load_clean_df(file_bytes):
             df[col] = clean_numeric_column(df[col])
 
     for col in df.columns:
-        if "DATA" in col.upper():
+        if "DATA" in str(col).upper():
             df[col] = (
                 pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
             ).fillna(df[col])
-        elif any(k in col.upper() for k in ["ORA", "ORARIO"]):
+        elif any(k in str(col).upper() for k in ["ORA", "ORARIO"]):
             df[col] = df[col].astype(str).str.replace("00:00:00", "").str.strip()
 
     return df
@@ -79,44 +76,37 @@ def detect_team_columns(df):
     for c in df.columns:
         c_clean = str(c).upper().strip()
         if c_clean in [
-            "CASA",
-            "SQUADRA CASA",
-            "SQUADRA_CASA",
-            "HOME",
-            "SQUADRA 1",
-            "SQUADRA_1",
+            "CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", 
+            "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM"
         ]:
             col_casa = c
         elif c_clean in [
-            "OSPITE",
-            "SQUADRA OSPITE",
-            "SQUADRA_OSPITE",
-            "AWAY",
-            "SQUADRA 2",
-            "SQUADRA_2",
-            "TRASFERTA",
+            "OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", 
+            "SQUADRA 2", "SQUADRA_2", "TRASFERTA", "SQUADRA A", "AWAY TEAM"
         ]:
             col_ospite = c
 
-    if not col_casa:
-        for c in df.columns:
+    if not col_casa or not col_ospite:
+        # Fallback: cerca nelle prime colonne stringhe che non siano numeri o date
+        text_cols = [c for c in df.columns if df[c].dtype == "object" or df[c].dtype == "string"]
+        for c in text_cols:
             c_clean = str(c).upper().strip()
-            if (
-                "CASA" in c_clean
-                and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI"])
-            ):
+            if not col_casa and "CASA" in c_clean and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI", "QUOTA"]):
                 col_casa = c
-                break
-
-    if not col_ospite:
-        for c in df.columns:
-            c_clean = str(c).upper().strip()
-            if (
-                ("OSPITE" in c_clean or "TRASFERTA" in c_clean)
-                and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI"])
-            ):
+            elif not col_ospite and any(x in c_clean for x in ["OSPITE", "TRASFERTA", "AWAY"]) and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI", "QUOTA"]):
                 col_ospite = c
-                break
+
+    # Se ancora non trovate, assegna le prime due colonne di testo
+    if not col_casa or not col_ospite:
+        string_cols = []
+        for c in df.columns:
+            sample_val = df[c].dropna().astype(str).head(5).tolist()
+            if sample_val and not any(re.match(r"^-?\d+[\.,]?\d*$", v.strip()) for v in sample_val):
+                if not any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO", "LEGA", "CAMPIONATO"]):
+                    string_cols.append(c)
+        if len(string_cols) >= 2:
+            col_casa = col_casa or string_cols[0]
+            col_ospite = col_ospite or string_cols[1]
 
     return col_casa, col_ospite
 
@@ -353,15 +343,13 @@ def get_sorted_strategies(df_base, strategie_dict):
     return ranked_strategies
 
 
-def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
+def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_casa, col_ospite):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
     )
     df_future = (
         df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
     )
-
-    col_casa, col_ospite = detect_team_columns(df_filtered)
 
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
@@ -400,11 +388,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
         if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali:
             cols_finali.append(col_ospite)
 
-        if not col_casa and not col_ospite:
-            for c in df_future.columns[:6]:
-                if c not in cols_finali and c not in ["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"]:
-                    cols_finali.append(c)
-
         cols_finali.extend(["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"])
         cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
 
@@ -420,16 +403,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
             if any(
                 k in str(c).upper()
                 for k in [
-                    "DATA",
-                    "ORA",
-                    "CASA",
-                    "OSPITE",
-                    "GOL",
-                    "SOMMA",
-                    "DC",
-                    "C1",
-                    "C2",
-                    "WIN",
+                    "DATA", "ORA", "CASA", "OSPITE", "GOL", "SOMMA", "DC", "C1", "C2", "WIN"
                 ]
             )
         ]
@@ -440,7 +414,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
 
 st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
 
-# Sidebar - Configurazione API Key
 st.sidebar.header("🔑 Configurazione Odds API")
 api_key = st.sidebar.text_input(
     "API Key:",
@@ -476,15 +449,30 @@ try:
     if df_raw is not None:
         df_base = df_raw.copy()
 
-        # Pulsante di Diagnostica
+        # Selezione manuale/automatica delle colonne Squadra
+        col_casa_auto, col_ospite_auto = detect_team_columns(df_base)
+        st.sidebar.header("📌 Selezione Colonne Squadre")
+        all_cols = list(df_base.columns)
+        
+        idx_casa = all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
+        idx_ospite = all_cols.index(col_ospite_auto) if col_ospite_auto in all_cols else (1 if len(all_cols) > 1 else 0)
+
+        col_casa = st.sidebar.selectbox("Colonna Squadra Casa:", all_cols, index=idx_casa)
+        col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
+
         if st.sidebar.button("🔎 Esegui Diagnostica Matching"):
-            col_casa, col_ospite = detect_team_columns(df_base)
             df_future_diag = df_base[df_base["GOL CASA"].isna()].copy()
-            diag_results = []
+            # Rimuove righe dove entrambe le squadre sono nulle
+            df_future_diag = df_future_diag.dropna(subset=[col_casa, col_ospite], how="all")
             
+            diag_results = []
             for _, r in df_future_diag.iterrows():
-                h_team = str(r.get(col_casa, ""))
-                a_team = str(r.get(col_ospite, ""))
+                h_team = str(r.get(col_casa, "")).strip()
+                a_team = str(r.get(col_ospite, "")).strip()
+                
+                if not h_team or h_team == "nan" or not a_team or a_team == "nan":
+                    continue
+
                 found_match = "❌ NESSUNA CORRISPONDENZA"
                 matched_with = ""
                 
@@ -508,96 +496,28 @@ try:
 
         STRATEGIE_SALVATE = {
             "Esito X super combo 235 match 37.45%": {
-                "SOMMA": None,
-                "DC": None,
-                "C1": -1.5,
-                "C1_OP": ">=",
-                "C2": 0.0,
-                "C2_OP": "<=",
-                "MEDIA CASA": 1.0,
-                "MEDIA_CASA_OP": ">=",
-                "MEDIA OSPITE": 1.50,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": None, "DC": None, "C1": -1.5, "C1_OP": ">=", "C2": 0.0, "C2_OP": "<=", "MEDIA CASA": 1.0, "MEDIA_CASA_OP": ">=", "MEDIA OSPITE": 1.50, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito X 300 match 36.33%": {
-                "SOMMA": None,
-                "DC": None,
-                "C1": -1.5,
-                "C1_OP": ">=",
-                "C2": 1.0,
-                "C2_OP": "<=",
-                "MEDIA CASA": None,
-                "MEDIA OSPITE": 1.50,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": None, "DC": None, "C1": -1.5, "C1_OP": ">=", "C2": 1.0, "C2_OP": "<=", "MEDIA CASA": None, "MEDIA OSPITE": 1.50, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito X 406 match 34.24%": {
-                "SOMMA": None,
-                "DC": None,
-                "C1": None,
-                "C2": None,
-                "MEDIA CASA": 1.1,
-                "MEDIA_CASA_OP": ">=",
-                "MEDIA OSPITE": 1.50,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": None, "DC": None, "C1": None, "C2": None, "MEDIA CASA": 1.1, "MEDIA_CASA_OP": ">=", "MEDIA OSPITE": 1.50, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito X 263 match 36.5%": {
-                "SOMMA": -1.03,
-                "SOMMA_OP": ">=",
-                "DC": None,
-                "C1": None,
-                "C2": None,
-                "MEDIA CASA": None,
-                "MEDIA OSPITE": 1.54,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": -1.03, "SOMMA_OP": ">=", "DC": None, "C1": None, "C2": None, "MEDIA CASA": None, "MEDIA OSPITE": 1.54, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito X 200 match 38%": {
-                "SOMMA": -0.79,
-                "SOMMA_OP": ">=",
-                "DC": None,
-                "C1": None,
-                "C2": None,
-                "MEDIA CASA": 1.1,
-                "MEDIA_CASA_OP": ">=",
-                "MEDIA OSPITE": 1.51,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": -0.79, "SOMMA_OP": ">=", "DC": None, "C1": None, "C2": None, "MEDIA CASA": 1.1, "MEDIA_CASA_OP": ">=", "MEDIA OSPITE": 1.51, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito X 301 match 35.9%": {
-                "SOMMA": None,
-                "DC": 0.62,
-                "DC_OP": ">=",
-                "C1": -1.02,
-                "C1_OP": ">=",
-                "C2": None,
-                "MEDIA CASA": None,
-                "MEDIA OSPITE": 1.51,
-                "MEDIA_OSPITE_OP": "<=",
-                "MERCATO": "X",
+                "SOMMA": None, "DC": 0.62, "DC_OP": ">=", "C1": -1.02, "C1_OP": ">=", "C2": None, "MEDIA CASA": None, "MEDIA OSPITE": 1.51, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
             },
             "Esito 1-1 436 match 17.9%": {
-                "SOMMA": None,
-                "DC": None,
-                "C1": None,
-                "C2": 0.0,
-                "C2_OP": "<=",
-                "MEDIA CASA": None,
-                "MEDIA OSPITE": 1.50,
-                "MEDIA_OSPITE_OP": "<",
-                "MERCATO": "ESITO 1-1",
+                "SOMMA": None, "DC": None, "C1": None, "C2": 0.0, "C2_OP": "<=", "MEDIA CASA": None, "MEDIA OSPITE": 1.50, "MEDIA_OSPITE_OP": "<", "MERCATO": "ESITO 1-1",
             },
             "Esito und 2,5 ospite 248 match 90.3%": {
-                "SOMMA": None,
-                "DC": None,
-                "C1": None,
-                "C2": -4.0,
-                "C2_OP": "<=",
-                "MEDIA CASA": None,
-                "MEDIA OSPITE": None,
-                "MERCATO": "UNDER 2,5 OSPITE",
+                "SOMMA": None, "DC": None, "C1": None, "C2": -4.0, "C2_OP": "<=", "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "UNDER 2,5 OSPITE",
             },
         }
 
@@ -619,8 +539,7 @@ try:
                 "Finestra Media Mobile per Alert", 10, 50, 20, 5
             )
 
-            alert_underperforming = []
-            alert_bounce_back = []
+            alert_underperforming, alert_bounce_back = [], []
 
             for item in ranked_strategies:
                 name = item["nome"]
@@ -634,12 +553,10 @@ try:
 
                 if tot_strat >= finestra_alert:
                     df_strat_played["MA"] = (
-                        df_strat_played["WIN"].rolling(window=finestra_alert).mean()
-                        * 100
+                        df_strat_played["WIN"].rolling(window=finestra_alert).mean() * 100
                     )
                     ma_series = df_strat_played["MA"].dropna()
                     mm_att = ma_series.iloc[-1]
-
                     diff_storica = mm_att - win_rate_storico
 
                     if mm_att < win_rate_storico:
@@ -647,18 +564,10 @@ try:
                             "Strategia": name,
                             "Mercato": params["MERCATO"],
                             "Match Giocati": tot_strat,
-                            "WR Storico Target": (
-                                f"{str(round(win_rate_storico, 2)).replace('.', ',')}%"
-                            ),
-                            "WR Attuale Reale": (
-                                f"{str(round(win_rate_reale, 2)).replace('.', ',')}%"
-                            ),
-                            f"MM Attuale ({finestra_alert}p)": (
-                                f"{str(round(mm_att, 1)).replace('.', ',')}%"
-                            ),
-                            "Scostamento vs Storico": (
-                                f"{str(round(diff_storica, 1)).replace('.', ',')}%"
-                            ),
+                            "WR Storico Target": f"{str(round(win_rate_storico, 2)).replace('.', ',')}%",
+                            "WR Attuale Reale": f"{str(round(win_rate_reale, 2)).replace('.', ',')}%",
+                            f"MM Attuale ({finestra_alert}p)": f"{str(round(mm_att, 1)).replace('.', ',')}%",
+                            "Scostamento vs Storico": f"{str(round(diff_storica, 1)).replace('.', ',')}%",
                         })
 
                         last_win = df_strat_played["WIN"].iloc[-1]
@@ -669,30 +578,17 @@ try:
                             alert_bounce_back.append({
                                 "Strategia": name,
                                 "Mercato": params["MERCATO"],
-                                "WR Storico Target": (
-                                    f"{str(round(win_rate_storico, 2)).replace('.', ',')}%"
-                                ),
-                                f"MM Precedente ({finestra_alert}p)": (
-                                    f"{str(round(mm_prev, 1)).replace('.', ',')}%"
-                                ),
-                                f"MM Attuale ({finestra_alert}p)": (
-                                    f"{str(round(mm_att, 1)).replace('.', ',')}%"
-                                ),
-                                "Rimbalzo": (
-                                    f"+{str(round(diff_bounce, 1)).replace('.', ',')}%"
-                                ),
+                                "WR Storico Target": f"{str(round(win_rate_storico, 2)).replace('.', ',')}%",
+                                f"MM Precedente ({finestra_alert}p)": f"{str(round(mm_prev, 1)).replace('.', ',')}%",
+                                f"MM Attuale ({finestra_alert}p)": f"{str(round(mm_att, 1)).replace('.', ',')}%",
+                                "Rimbalzo": f"+{str(round(diff_bounce, 1)).replace('.', ',')}%",
                                 "Ultimo Esito": "✅ WIN",
                             })
 
             st.markdown("### 🚀 SEGNALI DI RIENTRO IN TREND (Bounce Back)")
             if alert_bounce_back:
-                st.success(
-                    f"🔥 Trovate {len(alert_bounce_back)} strategie con segnale"
-                    " di inversione di trend:"
-                )
-                st.dataframe(
-                    pd.DataFrame(alert_bounce_back), use_container_width=True
-                )
+                st.success(f"🔥 Trovate {len(alert_bounce_back)} strategie con segnale di inversione di trend:")
+                st.dataframe(pd.DataFrame(alert_bounce_back), use_container_width=True)
             else:
                 st.info("Nessun segnale di rimbalzo attivo nell'ultimo match.")
 
@@ -700,22 +596,15 @@ try:
 
             st.markdown("### 🚨 STRATEGIE IN SOTTOPERFORMANCE")
             if alert_underperforming:
-                st.warning(
-                    f"Trovate {len(alert_underperforming)} strategie sotto la"
-                    " baseline storica:"
-                )
-                st.dataframe(
-                    pd.DataFrame(alert_underperforming), use_container_width=True
-                )
+                st.warning(f"Trovate {len(alert_underperforming)} strategie sotto la baseline storica:")
+                st.dataframe(pd.DataFrame(alert_underperforming), use_container_width=True)
             else:
                 st.success("🎉 Tutte le strategie stabili sopra la media target.")
 
         else:
             st.sidebar.markdown("---")
             strat_map = {item["nome"]: item for item in ranked_strategies}
-            strat_nome = st.sidebar.selectbox(
-                "Scegli Strategia da Analizzare", list(strat_map.keys())
-            )
+            strat_nome = st.sidebar.selectbox("Scegli Strategia da Analizzare", list(strat_map.keys()))
 
             selected_item = strat_map[strat_nome]
             params = selected_item["params"]
@@ -725,30 +614,20 @@ try:
             df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
             tot_match = len(df_played)
 
-            win_rate_reale = (
-                (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
-            )
+            win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
             st.subheader(f"📊 {strat_nome}")
             st.info(
-                f"🎯 **Win Rate Reale:**"
-                f" {str(round(win_rate_reale, 2)).replace('.', ',')}% | **Quota"
-                f" Limite Minima (Fair Odds):**"
-                f" {str(round(quota_limite, 2)).replace('.', ',')}"
+                f"🎯 **Win Rate Reale:** {str(round(win_rate_reale, 2)).replace('.', ',')}% | "
+                f"**Quota Limite Minima (Fair Odds):** {str(round(quota_limite, 2)).replace('.', ',')}"
             )
 
-            finestra_ma = st.sidebar.slider(
-                "Finestra Media Mobile (Partite)", 10, 50, 20, 5
-            )
+            finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
 
             if tot_match >= finestra_ma:
-                df_played["MA"] = (
-                    df_played["WIN"].rolling(window=finestra_ma).mean() * 100
-                )
-                df_played["FREQ_CUM_DINAMICA"] = (
-                    df_played["WIN"].expanding().mean() * 100
-                )
+                df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma).mean() * 100
+                df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
 
                 chart_data = pd.DataFrame({
                     f"Media Mobile ({finestra_ma} match)": df_played["MA"],
@@ -757,9 +636,7 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(
-                df_strat, quota_limite, odds_dataset, params["MERCATO"]
-            )
+            render_tables(df_strat, quota_limite, odds_dataset, params["MERCATO"], col_casa, col_ospite)
 
 except Exception as e:
     st.error(f"Errore durante l'elaborazione dei dati: {e}")
