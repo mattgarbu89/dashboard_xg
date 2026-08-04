@@ -138,7 +138,6 @@ def apply_filters(df, params):
   """Funzione ausiliaria per filtrare il DataFrame secondo i parametri della strategia."""
   mask = pd.Series([True] * len(df))
 
-  # Mappatura operatori per i filtri avanzati
   ops = {
       ">=": lambda s, v: s >= v,
       "<=": lambda s, v: s <= v,
@@ -152,7 +151,7 @@ def apply_filters(df, params):
     if val is not None and col in df.columns:
       op_str = params.get(f"{col}_OP", ">=")
       if col == "C2" and f"{col}_OP" not in params:
-        op_str = "<="  # Fallback retrocompatibilità
+        op_str = "<="
       if col == "MEDIA OSPITE" and f"{col}_OP" not in params:
         op_str = params.get("MEDIA_OSPITE_OP", "<=")
 
@@ -166,8 +165,37 @@ def apply_filters(df, params):
   return df_filtered
 
 
+def get_params_string(params):
+  """Genera una stringa leggibile con la lista dei parametri attivi."""
+  items = []
+  col_names = {
+      "SOMMA": "SOMMA",
+      "DC": "DC",
+      "C1": "C1",
+      "C2": "C2",
+      "MEDIA CASA": "Media Casa",
+      "MEDIA OSPITE": "Media Ospite",
+  }
+
+  for col, label in col_names.items():
+    val = params.get(col)
+    if val is not None:
+      op = params.get(f"{col}_OP", ">=")
+      if col == "C2" and f"{col}_OP" not in params:
+        op = "<="
+      if col == "MEDIA OSPITE" and f"{col}_OP" not in params:
+        op = params.get("MEDIA_OSPITE_OP", "<=")
+
+      val_str = str(val).replace(".", ",")
+      items.append(f"{label} {op} {val_str}")
+
+  if items:
+    return " | ".join(items)
+  else:
+    return "Nessun filtro xG applicato (Tutto il database)"
+
+
 def render_tables(df_filtered):
-  """Visualizza separatamente le prossime partite da giocare e le ultime giocate."""
   df_played = (
       df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
   )
@@ -202,7 +230,6 @@ def render_tables(df_filtered):
   if not cols_da_mostrare:
     cols_da_mostrare = cols_disponibili[:8]
 
-  # PROSSIME PARTITE DA GIOCARE
   st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
   if len(df_future) > 0:
     cols_future = [
@@ -212,7 +239,6 @@ def render_tables(df_filtered):
   else:
     st.info("Nessuna prossima partita trovata per questa strategia.")
 
-  # ULTIME PARTITE PROCESSATE (GIOCATE)
   st.subheader(f"📋 Ultime Partite Processate / Giocate ({len(df_played)})")
   if len(df_played) > 0:
     st.dataframe(
@@ -274,31 +300,9 @@ try:
     ]
 
     # ==========================================
-    # STRATEGIE SALVATE (ORDINATE PER WIN RATE)
+    # STRATEGIE SALVATE
     # ==========================================
     STRATEGIE_SALVATE = {
-        "Esito und 2,5 ospite 248 match 90.3%": {
-            "SOMMA": None,
-            "DC": None,
-            "C1": None,
-            "C2": -4.0,
-            "C2_OP": "<=",
-            "MEDIA CASA": None,
-            "MEDIA OSPITE": None,
-            "MERCATO": "UNDER 2,5 OSPITE",
-        },
-        "Esito X 200 match 38%": {
-            "SOMMA": -0.79,
-            "SOMMA_OP": ">=",
-            "DC": None,
-            "C1": None,
-            "C2": None,
-            "MEDIA CASA": 1.1,
-            "MEDIA_CASA_OP": ">=",
-            "MEDIA OSPITE": 1.51,
-            "MEDIA_OSPITE_OP": "<=",
-            "MERCATO": "X",
-        },
         "Esito X super combo 235 match 37.45%": {
             "SOMMA": None,
             "DC": None,
@@ -307,6 +311,29 @@ try:
             "C2": 0.0,
             "C2_OP": "<=",
             "MEDIA CASA": 1.0,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
+        },
+        "Esito X 300 match 36.33%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": -1.5,
+            "C1_OP": ">=",
+            "C2": 1.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
+        },
+        "Esito X 406 match 34.24%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": None,
+            "MEDIA CASA": 1.1,
             "MEDIA_CASA_OP": ">=",
             "MEDIA OSPITE": 1.50,
             "MEDIA_OSPITE_OP": "<=",
@@ -323,15 +350,15 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "Esito X 300 match 36.33%": {
-            "SOMMA": None,
+        "Esito X 200 match 38%": {
+            "SOMMA": -0.79,
+            "SOMMA_OP": ">=",
             "DC": None,
-            "C1": -1.5,
-            "C1_OP": ">=",
-            "C2": 1.0,
-            "C2_OP": "<=",
-            "MEDIA CASA": None,
-            "MEDIA OSPITE": 1.50,
+            "C1": None,
+            "C2": None,
+            "MEDIA CASA": 1.1,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.51,
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
@@ -347,17 +374,6 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "Esito X 406 match 34.24%": {
-            "SOMMA": None,
-            "DC": None,
-            "C1": None,
-            "C2": None,
-            "MEDIA CASA": 1.1,
-            "MEDIA_CASA_OP": ">=",
-            "MEDIA OSPITE": 1.50,
-            "MEDIA_OSPITE_OP": "<=",
-            "MERCATO": "X",
-        },
         "Esito 1-1 436 match 17.9%": {
             "SOMMA": None,
             "DC": None,
@@ -369,9 +385,18 @@ try:
             "MEDIA_OSPITE_OP": "<",
             "MERCATO": "ESITO 1-1",
         },
+        "Esito und 2,5 ospite 248 match 90.3%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": -4.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": None,
+            "MERCATO": "UNDER 2,5 OSPITE",
+        },
     }
 
-    # SELETTORE PRINCIPALE
     st.sidebar.header("📌 SELEZIONA MODALITÀ")
     modalita = st.sidebar.radio(
         "Scegli il tipo di analisi:",
@@ -382,11 +407,8 @@ try:
         ],
     )
 
-    # -------------------------------------------------------------------------
-    # MODALITÀ 0: PANORAMICA SOTTOPERFORMANTE (AUTOMATICA)
-    # -------------------------------------------------------------------------
     if "🚨" in modalita:
-      st.subheader("🚨 Report Strategie in Sottoperperformance")
+      st.subheader("🚨 Report Strategie in Sottoperformance")
       st.write(
           "Elenco sintetico delle strategie salvate la cui **Media Mobile"
           " recente è INFERIORE alla Media Storica Totale** o che presentano"
@@ -426,11 +448,16 @@ try:
             alert_list.append({
                 "Strategia": name,
                 "Mercato": params["MERCATO"],
+                "Parametri Filtro": get_params_string(params),
                 "Match Giocati": tot_strat,
-                "Win Rate Totale": f"{win_rate_tot:.1f}%",
-                "Quota Reale": f"{quota_reale:.2f}",
-                f"MM Attuale ({finestra_alert}p)": f"{mm_att:.1f}%",
-                "Scostamento": f"{diff:.1f}%",
+                "Win Rate Totale": (
+                    f"{str(round(win_rate_tot, 1)).replace('.', ',')}%"
+                ),
+                "Quota Reale": f"{str(round(quota_reale, 2)).replace('.', ',')}",
+                f"MM Attuale ({finestra_alert}p)": (
+                    f"{str(round(mm_att, 1)).replace('.', ',')}%"
+                ),
+                "Scostamento": f"{str(round(diff, 1)).replace('.', ',')}%",
                 "Ritardo Attuale": rit_att,
             })
 
@@ -446,9 +473,6 @@ try:
             "🎉 Nessuna strategia è attualmente sotto la sua media storica!"
         )
 
-    # -------------------------------------------------------------------------
-    # MODALITÀ 1: MERCATI SINGOLI SU TUTTE LE PARTITE
-    # -------------------------------------------------------------------------
     elif "1." in modalita:
       st.sidebar.markdown("---")
       st.sidebar.subheader("Mercato da Analizzare")
@@ -494,17 +518,32 @@ try:
         mm_max = ma_clean.max()
 
         st.subheader(f"📊 {titolo_analisi}")
+        st.info("ℹ️ **Parametri Filtro:** Tutto il database (Nessun filtro xG)")
+
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Match Giocati", tot_match)
-        col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
-        col3.metric("Quota Reale", f"{quota_reale:.2f}")
+        col2.metric(
+            "Win Rate Totale", f"{str(round(freq_cum, 1)).replace('.', ',')}%"
+        )
+        col3.metric(
+            "Quota Reale", f"{str(round(quota_reale, 2)).replace('.', ',')}"
+        )
         col4.metric("Ritardo Attuale", rit_att)
         col5.metric("Ritardo Max Storico", rit_max)
-        col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
+        col6.metric(
+            f"MM Attuale ({finestra_ma}p)",
+            f"{str(round(mm_att, 1)).replace('.', ',')}%",
+        )
 
         col_m1, col_m2 = st.columns(2)
-        col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
-        col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
+        col_m1.metric(
+            "MM Minima Registrata",
+            f"{str(round(mm_min, 1)).replace('.', ',')}%",
+        )
+        col_m2.metric(
+            "MM Massima Registrata",
+            f"{str(round(mm_max, 1)).replace('.', ',')}%",
+        )
 
         chart_data = pd.DataFrame({
             f"Media Mobile ({finestra_ma} match)": df_played["MA"],
@@ -515,9 +554,6 @@ try:
 
         render_tables(df)
 
-    # -------------------------------------------------------------------------
-    # MODALITÀ 2: STRATEGIE E FILTRI xG SALVATI
-    # -------------------------------------------------------------------------
     else:
       st.sidebar.markdown("---")
       st.sidebar.subheader("Scegli Strategia Salvata")
@@ -537,7 +573,7 @@ try:
             "Mercato Target", MERCATI, index=1
         )
 
-        manual_params = {"MERCATO": mercato_target}
+        params = {"MERCATO": mercato_target}
 
         metriche = [
             ("C1", "C1 (Scarto Casa)", -1.00, ">="),
@@ -568,10 +604,10 @@ try:
                 key=f"val_{col_name}",
             )
 
-            manual_params[col_name] = val_sel
-            manual_params[f"{col_name}_OP"] = op_sel
+            params[col_name] = val_sel
+            params[f"{col_name}_OP"] = op_sel
 
-        df = apply_filters(df_base, manual_params)
+        df = apply_filters(df_base, params)
         titolo_analisi = (
             f"Filtro Manuale Personalizzato - Target: {mercato_target}"
         )
@@ -608,17 +644,34 @@ try:
         mm_max = ma_clean.max()
 
         st.subheader(f"📊 {titolo_analisi}")
+
+        # BOX INFORMATIVO CON I PARAMETRI
+        st.info(f"⚙️ **Parametri Filtro Attivi:** {get_params_string(params)}")
+
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Match Giocati", tot_match)
-        col2.metric("Win Rate Totale", f"{freq_cum:.1f}%")
-        col3.metric("Quota Reale", f"{quota_reale:.2f}")
+        col2.metric(
+            "Win Rate Totale", f"{str(round(freq_cum, 1)).replace('.', ',')}%"
+        )
+        col3.metric(
+            "Quota Reale", f"{str(round(quota_reale, 2)).replace('.', ',')}"
+        )
         col4.metric("Ritardo Attuale", rit_att)
         col5.metric("Ritardo Max Storico", rit_max)
-        col6.metric(f"MM Attuale ({finestra_ma}p)", f"{mm_att:.1f}%")
+        col6.metric(
+            f"MM Attuale ({finestra_ma}p)",
+            f"{str(round(mm_att, 1)).replace('.', ',')}%",
+        )
 
         col_m1, col_m2 = st.columns(2)
-        col_m1.metric("MM Minima Registrata", f"{mm_min:.1f}%")
-        col_m2.metric("MM Massima Registrata", f"{mm_max:.1f}%")
+        col_m1.metric(
+            "MM Minima Registrata",
+            f"{str(round(mm_min, 1)).replace('.', ',')}%",
+        )
+        col_m2.metric(
+            "MM Massima Registrata",
+            f"{str(round(mm_max, 1)).replace('.', ',')}%",
+        )
 
         chart_data = pd.DataFrame({
             f"Media Mobile ({finestra_ma} match)": df_played["MA"],
