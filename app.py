@@ -137,7 +137,6 @@ def clean_team_name(name):
     
     text = strip_accents(str(name))
     
-    # Normalizzazione abbreviazioni chiave
     replacements = {
         r"\butd\b": "united",
         r"\bu\.\b": "universidad ",
@@ -148,10 +147,7 @@ def clean_team_name(name):
         r"\bsc\b": "",
         r"\bcf\b": "",
         r"\bcd\b": "",
-        r"\brj\b": "",
-        r"\bsp\b": "",
-        r"\bmg\b": "",
-        r"\bpr\b": "",
+        r"\bthór\b": "thor",
     }
     for pat, repl in replacements.items():
         text = re.sub(pat, repl, text)
@@ -171,19 +167,33 @@ def fuzzy_single_team(t1, t2):
     if c1 == c2:
         return True
 
-    # Se un nome è molto corto (es. CRB, Avai)
-    if len(c1) <= 4 or len(c2) <= 4:
-        return c1 == c2 or c1 in c2.split() or c2 in c1.split()
+    words1 = c1.split()
+    words2 = c2.split()
 
-    if c1 in c2 or c2 in c1:
-        return True
+    # Se una ha un suffisso distintivo come 'sp' (Botafogo SP vs Botafogo RJ)
+    if ('sp' in words1 and 'sp' not in words2) or ('sp' in words2 and 'sp' not in words1):
+        return False
+
+    # Controllo sulla prima parola chiave (es. Derry vs York, Sligo vs Bristol)
+    main_word1 = words1[0] if words1 else ""
+    main_word2 = words2[0] if words2 else ""
+
+    generic_words = ["city", "united", "town", "rovers", "athletic", "sporting", "fc", "real", "union", "deportes", "universidad"]
+    
+    if main_word1 not in generic_words and main_word2 not in generic_words:
+        if len(main_word1) >= 3 and len(main_word2) >= 3:
+            ratio_main = difflib.SequenceMatcher(None, main_word1, main_word2).ratio()
+            if ratio_main < 0.65 and main_word1 not in main_word2 and main_word2 not in main_word1:
+                return False
+
+    if len(c1) <= 4 or len(c2) <= 4:
+        return c1 == c2 or c1 in words2 or c2 in words1
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.55
+    return ratio >= 0.50
 
 
 def is_match_pair(h1, a1, h2, a2):
-    # Entrambe le squadre devono corrispondere contemporaneamente
     return fuzzy_single_team(h1, h2) and fuzzy_single_team(a1, a2)
 
 
@@ -205,7 +215,8 @@ def fetch_all_active_odds(api_key):
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
             "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league",
             "soccer_usa_mls", "soccer_norway_eliteserien", "soccer_brazil_campeonato", 
-            "soccer_brazil_serie_b", "soccer_chile_campeonato", "soccer_iceland_urvalsdeild"
+            "soccer_brazil_serie_b", "soccer_chile_campeonato", "soccer_iceland_urvalsdeild",
+            "soccer_iceland_deild", "soccer_ireland_premier_division"
         ]
 
     all_odds = []
