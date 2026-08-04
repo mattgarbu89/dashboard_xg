@@ -26,9 +26,7 @@ def get_drive_direct_url(url):
 
 def clean_numeric_column(series):
   """Converte una colonna in numeri gestendo virgole e punti decimali."""
-  return pd.to_numeric(
-      series.astype(str).str.replace(",", "."), errors="coerce"
-  )
+  return pd.to_numeric(series.astype(str).str.replace(",", "."), errors="coerce")
 
 
 def load_clean_df(file_bytes):
@@ -140,29 +138,27 @@ def evaluate_market(row, market):
 def apply_filters(df, params):
   """Funzione ausiliaria per filtrare il DataFrame secondo i parametri della strategia."""
   mask = pd.Series([True] * len(df))
-  somma_val = params.get("SOMMA")
-  dc_val = params.get("DC")
-  c1_val = params.get("C1")
-  c2_val = params.get("C2")
-  mc_val = params.get("MEDIA CASA")
-  mo_val = params.get("MEDIA OSPITE")
-  mo_op = params.get("MEDIA_OSPITE_OP", "<=")
 
-  if somma_val is not None and "SOMMA" in df.columns:
-    mask &= df["SOMMA"] >= somma_val
-  if dc_val is not None and "DC" in df.columns:
-    mask &= df["DC"] >= dc_val
-  if c1_val is not None and "C1" in df.columns:
-    mask &= df["C1"] >= c1_val
-  if c2_val is not None and "C2" in df.columns:
-    mask &= df["C2"] <= c2_val
-  if mc_val is not None and "MEDIA CASA" in df.columns:
-    mask &= df["MEDIA CASA"] >= mc_val
-  if mo_val is not None and "MEDIA OSPITE" in df.columns:
-    if mo_op == "<":
-      mask &= df["MEDIA OSPITE"] < mo_val
-    else:
-      mask &= df["MEDIA OSPITE"] <= mo_val
+  # Mappatura operatori per i filtri avanzati
+  ops = {
+      ">=": lambda s, v: s >= v,
+      "<=": lambda s, v: s <= v,
+      ">": lambda s, v: s > v,
+      "<": lambda s, v: s < v,
+      "==": lambda s, v: s == v,
+  }
+
+  for col in ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]:
+    val = params.get(col)
+    if val is not None and col in df.columns:
+      op_str = params.get(f"{col}_OP", ">=")
+      if col == "C2" and f"{col}_OP" not in params:
+        op_str = "<="  # Fallback retrocompatibilità per strategie salvate
+      if col == "MEDIA OSPITE" and f"{col}_OP" not in params:
+        op_str = params.get("MEDIA_OSPITE_OP", "<=")
+
+      if op_str in ops:
+        mask &= ops[op_str](df[col], val)
 
   df_filtered = df[mask].copy().reset_index(drop=True)
   df_filtered["WIN"] = df_filtered.apply(
@@ -221,7 +217,8 @@ def render_tables(df_filtered):
   st.subheader(f"📋 Ultime Partite Processate / Giocate ({len(df_played)})")
   if len(df_played) > 0:
     st.dataframe(
-        df_played[cols_da_mostrare].tail(15).iloc[::-1], use_container_width=True
+        df_played[cols_da_mostrare].tail(15).iloc[::-1],
+        use_container_width=True,
     )
   else:
     st.info("Nessuna partita giocata ancora a storico per questo filtro.")
@@ -286,6 +283,7 @@ try:
             "DC": None,
             "C1": None,
             "C2": 0.0,
+            "C2_OP": "<=",
             "MEDIA CASA": None,
             "MEDIA OSPITE": 1.50,
             "MEDIA_OSPITE_OP": "<",
@@ -296,12 +294,14 @@ try:
             "DC": None,
             "C1": None,
             "C2": -4.0,
+            "C2_OP": "<=",
             "MEDIA CASA": None,
             "MEDIA OSPITE": None,
             "MERCATO": "UNDER 2,5 OSPITE",
         },
         "3. Esito X - Base (Somma >= -1.03 | Media Ospite <= 1.54)": {
             "SOMMA": -1.03,
+            "SOMMA_OP": ">=",
             "DC": None,
             "C1": None,
             "C2": None,
@@ -312,10 +312,12 @@ try:
         },
         "4. Esito X - Gold (Somma >= -0.79 | Media Casa >= 1.1 | Media Ospite <= 1.51)": {
             "SOMMA": -0.79,
+            "SOMMA_OP": ">=",
             "DC": None,
             "C1": None,
             "C2": None,
             "MEDIA CASA": 1.1,
+            "MEDIA_CASA_OP": ">=",
             "MEDIA OSPITE": 1.51,
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
@@ -323,7 +325,9 @@ try:
         "5. Esito X - Stabilità (C1 >= -1.02 | DC >= 0.62 | Media Ospite <= 1.51)": {
             "SOMMA": None,
             "DC": 0.62,
+            "DC_OP": ">=",
             "C1": -1.02,
+            "C1_OP": ">=",
             "C2": None,
             "MEDIA CASA": None,
             "MEDIA OSPITE": 1.51,
@@ -491,75 +495,46 @@ try:
         titolo_analisi = f"Strategia Salvata: {strat_nome}"
       else:
         st.sidebar.markdown("---")
-        st.sidebar.subheader("Imposta Filtri Manuali")
+        st.sidebar.subheader("⚙️ Filtri Personalizzati Dinamici")
         mercato_target = st.sidebar.selectbox(
             "Mercato Target", MERCATI, index=1
         )
 
-        use_somma = st.sidebar.checkbox("Filtra per SOMMA Minima", value=False)
-        somma_val = (
-            st.sidebar.number_input(
-                "SOMMA Minima", value=-1.03, step=0.01, format="%.2f"
-            )
-            if use_somma
-            else None
-        )
+        manual_params = {"MERCATO": mercato_target}
 
-        use_dc = st.sidebar.checkbox("Filtra per DC Minima", value=False)
-        dc_val = (
-            st.sidebar.number_input(
-                "DC Minima", value=0.00, step=0.01, format="%.2f"
-            )
-            if use_dc
-            else None
-        )
+        # Configurazione lista parametri personalizzati: (Nome Colonna, Etichetta Visualizzata, Valore Default, Operatore Default)
+        metriche = [
+            ("C1", "C1 (Scarto Casa)", -1.00, ">="),
+            ("C2", "C2 (Scarto Ospite)", 0.00, "<="),
+            ("DC", "DC (Diff C1 - C2)", 0.00, ">="),
+            ("SOMMA", "SOMMA (C1 + C2)", -1.03, ">="),
+            ("MEDIA CASA", "Media Casa xG", 1.10, ">="),
+            ("MEDIA OSPITE", "Media Ospite xG", 1.54, "<="),
+        ]
 
-        use_c1 = st.sidebar.checkbox("Filtra per C1 Minimo", value=False)
-        c1_val = (
-            st.sidebar.number_input(
-                "C1 Minimo", value=-1.00, step=0.01, format="%.2f"
+        for col_name, label, def_val, def_op in metriche:
+          use_param = st.sidebar.checkbox(
+              f"Filtra per {label}", value=False, key=f"use_{col_name}"
+          )
+          if use_param:
+            col_op, col_val = st.sidebar.columns([1, 2])
+            op_sel = col_op.selectbox(
+                "Op",
+                [">=", "<=", ">", "<", "=="],
+                index=[">=", "<=", ">", "<", "=="].index(def_op),
+                key=f"op_{col_name}",
             )
-            if use_c1
-            else None
-        )
-
-        use_c2 = st.sidebar.checkbox("Filtra per C2 Massimo", value=False)
-        c2_val = (
-            st.sidebar.number_input(
-                "C2 Massimo", value=0.00, step=0.01, format="%.2f"
+            val_sel = col_val.number_input(
+                "Valore",
+                value=float(def_val),
+                step=0.01,
+                format="%.2f",
+                key=f"val_{col_name}",
             )
-            if use_c2
-            else None
-        )
 
-        use_mc = st.sidebar.checkbox("Filtra per Media Casa Minima", value=False)
-        mc_val = (
-            st.sidebar.number_input(
-                "Media Casa Minima", value=1.10, step=0.01, format="%.2f"
-            )
-            if use_mc
-            else None
-        )
+            manual_params[col_name] = val_sel
+            manual_params[f"{col_name}_OP"] = op_sel
 
-        use_mo = st.sidebar.checkbox("Filtra per Media Ospite", value=False)
-        mo_val = (
-            st.sidebar.number_input(
-                "Media Ospite Soglia", value=1.54, step=0.01, format="%.2f"
-            )
-            if use_mo
-            else None
-        )
-
-        manual_params = {
-            "SOMMA": somma_val,
-            "DC": dc_val,
-            "C1": c1_val,
-            "C2": c2_val,
-            "MEDIA CASA": mc_val,
-            "MEDIA OSPITE": mo_val,
-            "MEDIA_OSPITE_OP": "<=",
-            "MERCATO": mercato_target,
-        }
         df = apply_filters(df_base, manual_params)
         titolo_analisi = (
             f"Filtro Manuale Personalizzato - Target: {mercato_target}"
