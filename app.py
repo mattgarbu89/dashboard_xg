@@ -121,126 +121,134 @@ def detect_team_columns(df):
     return col_casa, col_ospite
 
 
-def clean_team_string(text):
-    if not text or pd.isna(text):
+def clean_team_name(name):
+    if not name or pd.isna(name):
         return ""
-    text = str(text).lower().strip()
+    text = str(name).lower().strip()
     text = re.sub(r"[^\w\s]", "", text)
-    stopwords = [
-        "fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk",
-        "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st"
-    ]
+    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st"]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
 
-def are_teams_matching(t1, t2):
-    c1 = clean_team_string(t1)
-    c2 = clean_team_string(t2)
+def fuzzy_match_teams(t1, t2):
+    c1 = clean_team_name(t1)
+    c2 = clean_team_name(t2)
     if not c1 or not c2:
         return False
     if c1 in c2 or c2 in c1:
         return True
-    ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.65
+    
+    # Matching basato sul confronto di token (parole principali)
+    words1 = set(c1.split())
+    words2 = set(c2.split())
+    if len(words1.intersection(words2)) > 0:
+        return True
+        
+    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.55
 
 
 @st.cache_data(ttl=1800)
-def fetch_odds_from_api(api_key):
+def fetch_all_active_odds(api_key):
     if not api_key:
         return []
 
-    sports = [
-        "soccer_italy_serie_a",
-        "soccer_italy_serie_b",
-        "soccer_epl",
-        "soccer_spain_la_liga",
-        "soccer_germany_bundesliga",
-        "soccer_france_ligue_one",
-        "soccer_netherlands_eredivisie",
-        "soccer_belgium_first_div",
-        "soccer_brazil_campeonato",
-        "soccer_argentina_primera_division",
-        "soccer_uefa_champs_league",
-        "soccer_uefa_europa_league",
-    ]
+    # 1. Recupera dinamico di tutte le leghe di calcio attive dall'API
+    sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
+    try:
+        res_sports = requests.get(sports_url, timeout=5)
+        if res_sports.status_code != 200:
+            return []
+        all_sports = res_sports.json()
+        soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
+    except Exception:
+        soccer_keys = [
+            "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
+            "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
+            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league"
+        ]
 
     all_odds = []
-    for sport in sports:
-        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
+    # 2. Scarica le quote per ogni lega attiva
+    for key in soccer_keys[:15]:  # Limite per preservare il consumo di API call
+        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
-            res = requests.get(url, timeout=6)
+            res = requests.get(url, timeout=5)
             if res.status_code == 200:
                 data = res.json()
                 if isinstance(data, list):
                     all_odds.extend(data)
         except Exception:
             continue
+
     return all_odds
+
+
+def extract_best_odd(event, market_target):
+    m_target = str(market_target).upper().strip()
+    ev_home = event.get("home_team", "")
+    ev_away = event.get("away_team", "")
+
+    odds_1, odds_x, odds_2 = None, None, None
+    over_25, under_25 = None, None
+
+    for bookmaker in event.get("bookmakers", []):
+        for market in bookmaker.get("markets", []):
+            key = market.get("key")
+            outcomes = market.get("outcomes", [])
+
+            if key == "h2h":
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    name = out.get("name", "")
+                    if name == ev_home:
+                        odds_1 = max(odds_1 or 0, price)
+                    elif name == ev_away:
+                        odds_2 = max(odds_2 or 0, price)
+                    elif name in ["Draw", "X"]:
+                        odds_x = max(odds_x or 0, price)
+
+            elif key == "totals":
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    point = float(out.get("point", 0))
+                    name = out.get("name", "")
+                    if point == 2.5:
+                        if name == "Over":
+                            over_25 = max(over_25 or 0, price)
+                        elif name == "Under":
+                            under_25 = max(under_25 or 0, price)
+
+    if m_target == "1":
+        return odds_1
+    elif m_target == "X":
+        return odds_x
+    elif m_target == "2":
+        return odds_2
+    elif m_target == "1X":
+        return round(1 / ((1 / odds_1) + (1 / odds_x)), 2) if (odds_1 and odds_x) else odds_1
+    elif m_target == "X2":
+        return round(1 / ((1 / odds_2) + (1 / odds_x)), 2) if (odds_2 and odds_x) else odds_2
+    elif "OVER" in m_target:
+        return over_25
+    elif "UNDER" in m_target:
+        return under_25
+    elif m_target == "ESITO 1-1":
+        return odds_x
+
+    return odds_1 or odds_x or odds_2
 
 
 def match_odds(home_team, away_team, market_target, odds_data):
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None
 
-    m_target = str(market_target).upper().strip()
-
     for event in odds_data:
         ev_home = event.get("home_team", "")
         ev_away = event.get("away_team", "")
 
-        if are_teams_matching(home_team, ev_home) and are_teams_matching(away_team, ev_away):
-            odds_1, odds_x, odds_2 = None, None, None
-            over_25, under_25 = None, None
-
-            for bookmaker in event.get("bookmakers", []):
-                for market in bookmaker.get("markets", []):
-                    key = market.get("key")
-                    outcomes = market.get("outcomes", [])
-
-                    if key == "h2h":
-                        for out in outcomes:
-                            price = float(out.get("price", 0))
-                            name = out.get("name", "")
-                            if name == ev_home:
-                                odds_1 = max(odds_1 or 0, price)
-                            elif name == ev_away:
-                                odds_2 = max(odds_2 or 0, price)
-                            elif name in ["Draw", "X"]:
-                                odds_x = max(odds_x or 0, price)
-
-                    elif key == "totals":
-                        for out in outcomes:
-                            price = float(out.get("price", 0))
-                            point = float(out.get("point", 0))
-                            name = out.get("name", "")
-                            if point == 2.5:
-                                if name == "Over":
-                                    over_25 = max(over_25 or 0, price)
-                                elif name == "Under":
-                                    under_25 = max(under_25 or 0, price)
-
-            # Estrazione quota in base al mercato richiesto
-            if m_target == "1":
-                return odds_1
-            elif m_target == "X":
-                return odds_x
-            elif m_target == "2":
-                return odds_2
-            elif m_target == "1X" and odds_1 and odds_x:
-                return round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
-            elif m_target == "X2" and odds_2 and odds_x:
-                return round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
-            elif m_target in ["OVER 2,5", "OVER 2.5"]:
-                return over_25
-            elif m_target in ["UNDER 2,5", "UNDER 2.5", "UNDER 2,5 OSPITE"]:
-                return under_25
-            elif m_target == "ESITO 1-1":
-                # Fallback per mercati risultato esatto: usa la quota pareggio come riferimento
-                return odds_x
-
-            # Se il mercato è generico o non mappato direttamente, restituisce l'esito 1X2 principale
-            return odds_1 or odds_x or odds_2
+        if fuzzy_match_teams(home_team, ev_home) and fuzzy_match_teams(away_team, ev_away):
+            return extract_best_odd(event, market_target)
 
     return None
 
@@ -443,14 +451,14 @@ api_key = st.sidebar.text_input(
     type="password",
 )
 
-odds_dataset = fetch_odds_from_api(api_key) if api_key else []
+odds_dataset = fetch_all_active_odds(api_key) if api_key else []
 
 if len(odds_dataset) > 0:
-    st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match in memoria)")
-    with st.sidebar.expander("🔍 Match in memoria (Debug)"):
-        st.write([f"{m.get('home_team')} vs {m.get('away_team')}" for m in odds_dataset[:15]])
+    st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match salvati)")
+    with st.sidebar.expander("🔍 Match salvati in memoria"):
+        st.write([f"{m.get('home_team')} vs {m.get('away_team')}" for m in odds_dataset[:20]])
 else:
-    st.sidebar.warning("⚠️ Nessuna quota trovata. Verificare chiave o limite API.")
+    st.sidebar.warning("⚠️ Nessuna quota scaricata. Verifica API Key o disponibilità match.")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
     st.cache_data.clear()
