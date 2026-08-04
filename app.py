@@ -27,6 +27,17 @@ def clean_numeric_column(series):
     return pd.to_numeric(series.astype(str).str.replace(",", "."), errors="coerce")
 
 
+def format_num_comma(val, decimals=2):
+    """Formatta un numero con la virgola per i decimali."""
+    if val is None or pd.isna(val):
+        return "-"
+    try:
+        fmt = f"{{:.{decimals}f}}"
+        return fmt.format(float(val)).replace(".", ",")
+    except Exception:
+        return str(val)
+
+
 def load_clean_df(file_bytes):
     output = io.BytesIO()
     with zipfile.ZipFile(file_bytes, "r") as zin:
@@ -365,7 +376,6 @@ def apply_filters(df, params):
 
 
 def calculate_delays(win_series):
-    """Calcola il ritardoattuale e il ritardo massimo (consecutive losses)"""
     current_delay = 0
     max_delay = 0
     temp_delay = 0
@@ -410,6 +420,39 @@ def get_sorted_strategies(df_base, strategie_dict):
     return ranked_strategies
 
 
+def get_combination_string(params):
+    """Genera la stringa che esplicita la combinazione di parametri usata."""
+    condizioni = []
+    mercato = params.get("MERCATO", "N/D")
+
+    mancanti = {
+        "SOMMA": params.get("SOMMA_OP", ">="),
+        "DC": params.get("DC_OP", ">="),
+        "C1": params.get("C1_OP", ">="),
+        "C2": params.get("C2_OP", "<="),
+        "MEDIA CASA": params.get("MEDIA_CASA_OP", ">="),
+        "MEDIA OSPITE": params.get("MEDIA_OSPITE_OP", "<="),
+    }
+
+    for key, default_op in mancanti.items():
+        val = params.get(key)
+        if val is not None:
+            op_key = f"{key}_OP"
+            if key == "MEDIA CASA":
+                op_key = "MEDIA_CASA_OP"
+            elif key == "MEDIA OSPITE":
+                op_key = "MEDIA_OSPITE_OP"
+
+            op = params.get(op_key, default_op)
+            val_str = format_num_comma(val)
+            condizioni.append(f"**{key}** {op} `{val_str}`")
+
+    if not condizioni:
+        return f"🎯 **Mercato Target:** {mercato} | *Nessun filtro sui parametri fisso (Tutti i match)*"
+
+    return f"🎯 **Mercato Target:** `{mercato}`  \n⚙️ **Combinazione Parametri:** " + "  •  ".join(condizioni)
+
+
 def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_casa, col_ospite):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
@@ -429,7 +472,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
             q_book = match_odds(val_casa, val_ospite, market_target, odds_dataset)
             if q_book:
-                q_book_list.append(str(round(q_book, 2)).replace(".", ","))
+                q_book_list.append(format_num_comma(q_book))
                 if q_book > quota_limite:
                     semaforo_list.append("VALORE")
                 elif abs(q_book - quota_limite) <= 0.05:
@@ -440,7 +483,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
                 q_book_list.append("N/D")
                 semaforo_list.append("N/D")
 
-        df_future["Quota Limite"] = str(round(quota_limite, 2)).replace(".", ",")
+        df_future["Quota Limite"] = format_num_comma(quota_limite)
         df_future["Miglior Quota Bookmaker"] = q_book_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
@@ -596,10 +639,11 @@ try:
                             "Strategia": name,
                             "Mercato": params["MERCATO"],
                             "Match Giocati": tot_strat,
-                            "WR Storico Target": f"{str(round(win_rate_storico, 2)).replace('.', ',')}%",
-                            "WR Attuale Reale": f"{str(round(win_rate_reale, 2)).replace('.', ',')}%",
-                            f"MM Attuale ({finestra_alert}p)": f"{str(round(mm_att, 1)).replace('.', ',')}%",
-                            "Scostamento vs Storico": f"{str(round(diff_storica, 1)).replace('.', ',')}%",
+                            "WR Storico Target": f"{format_num_comma(win_rate_storico)}%",
+                            "WR Attuale Reale": f"{format_num_comma(win_rate_reale)}%",
+                            f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
+                            "Scostamento vs Storico": f"{format_num_comma(diff_storica, 1)}%",
+                            "Combinazione Filtri": get_combination_string(params),
                         })
 
                         last_win = df_strat_played["WIN"].iloc[-1]
@@ -610,11 +654,12 @@ try:
                             alert_bounce_back.append({
                                 "Strategia": name,
                                 "Mercato": params["MERCATO"],
-                                "WR Storico Target": f"{str(round(win_rate_storico, 2)).replace('.', ',')}%",
-                                f"MM Precedente ({finestra_alert}p)": f"{str(round(mm_prev, 1)).replace('.', ',')}%",
-                                f"MM Attuale ({finestra_alert}p)": f"{str(round(mm_att, 1)).replace('.', ',')}%",
-                                "Rimbalzo": f"+{str(round(diff_bounce, 1)).replace('.', ',')}%",
+                                "WR Storico Target": f"{format_num_comma(win_rate_storico)}%",
+                                f"MM Precedente ({finestra_alert}p)": f"{format_num_comma(mm_prev, 1)}%",
+                                f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
+                                "Rimbalzo": f"+{format_num_comma(diff_bounce, 1)}%",
                                 "Ultimo Esito": "WIN",
+                                "Combinazione Filtri": get_combination_string(params),
                             })
 
             st.markdown("### SEGNALI DI RIENTRO IN TREND (Bounce Back)")
@@ -647,7 +692,6 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO RITARDATORI E MEDIE MOBILI
             current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
 
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -665,6 +709,12 @@ try:
 
             st.subheader(f"📊 {strat_nome}")
 
+            # ESPLICITAZIONE DELLA COMBINAZIONE DEI PARAMETRI
+            with st.container(border=True):
+                st.markdown(get_combination_string(params))
+
+            st.markdown("#### 📈 Metriche Principali")
+
             # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE (NESSUN TESTO TAGLIATO)
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1:
@@ -675,12 +725,12 @@ try:
             with r1_c2:
                 with st.container(border=True):
                     st.caption("Win Rate Reale (%)")
-                    st.markdown(f"### {str(round(win_rate_reale, 2)).replace('.', ',')}%")
+                    st.markdown(f"### {format_num_comma(win_rate_reale)}%")
 
             with r1_c3:
                 with st.container(border=True):
                     st.caption("Quota Fair / Limite")
-                    st.markdown(f"### {str(round(quota_limite, 2)).replace('.', ',')}")
+                    st.markdown(f"### {format_num_comma(quota_limite)}")
 
             with r1_c4:
                 with st.container(border=True):
@@ -696,17 +746,17 @@ try:
             with r2_c2:
                 with st.container(border=True):
                     st.caption(f"MM Attuale ({finestra_ma} match)")
-                    st.markdown(f"### {str(round(mm_att, 1)).replace('.', ',')}%")
+                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
             with r2_c3:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma} match)")
-                    st.markdown(f"### {str(round(mm_min, 1)).replace('.', ',')}%")
+                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
 
             with r2_c4:
                 with st.container(border=True):
                     st.caption(f"MM Massima ({finestra_ma} match)")
-                    st.markdown(f"### {str(round(mm_max, 1)).replace('.', ',')}%")
+                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
 
