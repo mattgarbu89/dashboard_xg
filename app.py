@@ -73,25 +73,51 @@ def load_clean_df(file_bytes):
     return df
 
 
-def get_team_columns(df):
-    """Individua dinamicamente le colonne relative alla squadra di casa e ospite."""
+def detect_team_columns(df):
+    """Individua con precisione le colonne con i nomi delle squadre nel dataframe."""
     col_casa, col_ospite = None, None
+
+    # Controllo corrispondenze esatte
     for c in df.columns:
-        c_upper = c.upper().strip()
-        if c_upper in ["CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", "SQUADRA 1"]:
+        c_clean = str(c).upper().strip()
+        if c_clean in [
+            "CASA",
+            "SQUADRA CASA",
+            "SQUADRA_CASA",
+            "HOME",
+            "SQUADRA 1",
+            "SQUADRA_1",
+        ]:
             col_casa = c
-        elif c_upper in ["OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", "SQUADRA 2", "TRASFERTA"]:
+        elif c_clean in [
+            "OSPITE",
+            "SQUADRA OSPITE",
+            "SQUADRA_OSPITE",
+            "AWAY",
+            "SQUADRA 2",
+            "SQUADRA_2",
+            "TRASFERTA",
+        ]:
             col_ospite = c
 
-    # Fallback ricerca parziale
+    # Ricerca euristica secondaria se non trovate
     if not col_casa:
         for c in df.columns:
-            if "CASA" in c.upper() and "GOL" not in c.upper() and "MEDIA" not in c.upper() and "C1" not in c.upper():
+            c_clean = str(c).upper().strip()
+            if (
+                "CASA" in c_clean
+                and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI"])
+            ):
                 col_casa = c
                 break
+
     if not col_ospite:
         for c in df.columns:
-            if ("OSPITE" in c.upper() or "TRASFERTA" in c.upper()) and "GOL" not in c.upper() and "MEDIA" not in c.upper() and "C2" not in c.upper():
+            c_clean = str(c).upper().strip()
+            if (
+                ("OSPITE" in c_clean or "TRASFERTA" in c_clean)
+                and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI"])
+            ):
                 col_ospite = c
                 break
 
@@ -141,7 +167,6 @@ def match_odds(home_team, away_team, market_target, odds_data):
         ev_home = event.get("home_team", "").lower()
         ev_away = event.get("away_team", "").lower()
 
-        # Matching tollerante sui nomi
         if (
             home_clean in ev_home
             or ev_home in home_clean
@@ -155,7 +180,6 @@ def match_odds(home_team, away_team, market_target, odds_data):
             best_odd = 0.0
             for bookmaker in event.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
-                    # Mercato 1X2
                     if market["key"] == "h2h" and market_target in ["1", "X", "2"]:
                         target_name = (
                             event["home_team"]
@@ -170,7 +194,6 @@ def match_odds(home_team, away_team, market_target, odds_data):
                             if outcome["name"] == target_name:
                                 best_odd = max(best_odd, outcome.get("price", 0))
 
-                    # Mercato Under/Over 2.5
                     elif market["key"] == "totals" and "OVER 2,5" in market_target:
                         for outcome in market.get("outcomes", []):
                             if outcome["name"] == "Over" and outcome.get("point") == 2.5:
@@ -299,7 +322,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
         df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
     )
 
-    col_casa, col_ospite = get_team_columns(df_filtered)
+    col_casa, col_ospite = detect_team_columns(df_filtered)
 
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
@@ -327,23 +350,28 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
         df_future["Miglior Quota Bookmaker"] = q_book_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
-        # Individuazione dinamica delle colonne per la tabella delle prossime partite
-        cols_presenti = list(df_future.columns)
-        cols_base = []
-        for c in cols_presenti:
-            c_up = c.upper()
-            if any(k in c_up for k in ["DATA", "ORA", "ORARIO"]):
-                cols_base.append(c)
+        # Costruzione sicura della sequenza di colonne
+        cols_finali = []
+        for c in df_future.columns:
+            if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
+                if c not in cols_finali:
+                    cols_finali.append(c)
 
-        if col_casa and col_casa not in cols_base:
-            cols_base.append(col_casa)
-        if col_ospite and col_ospite not in cols_base:
-            cols_base.append(col_ospite)
+        if col_casa and col_casa in df_future.columns and col_casa not in cols_finali:
+            cols_finali.append(col_casa)
+        if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali:
+            cols_finali.append(col_ospite)
 
-        cols_future = cols_base + ["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"]
-        cols_future_clean = [c for c in cols_future if c in df_future.columns]
+        # Se per qualsiasi motivo non individua col_casa/col_ospite, include le prime colonne del df
+        if not col_casa and not col_ospite:
+            for c in df_future.columns[:6]:
+                if c not in cols_finali and c not in ["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"]:
+                    cols_finali.append(c)
 
-        st.dataframe(df_future[cols_future_clean], use_container_width=True)
+        cols_finali.extend(["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"])
+        cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
+
+        st.dataframe(df_future[cols_finali_clean], use_container_width=True)
     else:
         st.info("Nessuna prossima partita trovata per questa strategia.")
 
@@ -353,7 +381,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
             c
             for c in df_played.columns
             if any(
-                k in c.upper()
+                k in str(c).upper()
                 for k in [
                     "DATA",
                     "ORA",
