@@ -120,21 +120,21 @@ def detect_team_columns(df):
     return col_casa, col_ospite
 
 
-def clean_team_name(name):
-    """Semplifica e pulisce il nome della squadra per il matching."""
-    if not name or pd.isna(name):
+def normalize_string(text):
+    """Pulisce in modo aggressivo il nome della squadra per facilitare il matching."""
+    if not text or pd.isna(text):
         return ""
-    name_str = str(name).lower().strip()
-    # Rimuove prefissi e suffissi societari comuni
-    words_to_remove = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk"]
-    words = [w for w in re.split(r"\W+", name_str) if w not in words_to_remove and len(w) > 0]
-    return " ".join(words)
+    text = str(text).lower().strip()
+    text = re.sub(r"[^\w\s]", "", text)
+    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1"]
+    words = [w for w in text.split() if w not in stopwords]
+    return " ".join(words) if words else text
 
 
 @st.cache_data(ttl=1800)
 def fetch_odds_from_api(api_key):
     if not api_key:
-        return None
+        return []
 
     sports = [
         "soccer_italy_serie_a",
@@ -153,11 +153,14 @@ def fetch_odds_from_api(api_key):
 
     all_odds = []
     for sport in sports:
+        # Chiamata separata per h2h e totals per evitare blocchi dell'API
         url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
-            res = requests.get(url, timeout=10)
+            res = requests.get(url, timeout=8)
             if res.status_code == 200:
-                all_odds.extend(res.json())
+                data = res.json()
+                if isinstance(data, list):
+                    all_odds.extend(data)
         except Exception:
             continue
     return all_odds
@@ -167,45 +170,44 @@ def match_odds(home_team, away_team, market_target, odds_data):
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None
 
-    h_clean = clean_team_name(home_team)
-    a_clean = clean_team_name(away_team)
+    h_norm = normalize_string(home_team)
+    a_norm = normalize_string(away_team)
 
-    if not h_clean or not a_clean:
+    if not h_norm or not a_norm:
         return None
 
     for event in odds_data:
-        ev_home = clean_team_name(event.get("home_team", ""))
-        ev_away = clean_team_name(event.get("away_team", ""))
+        ev_h_norm = normalize_string(event.get("home_team", ""))
+        ev_a_norm = normalize_string(event.get("away_team", ""))
 
-        # Matching flessibile
-        match_h = (h_clean in ev_home) or (ev_home in h_clean) or (h_clean[:4] == ev_home[:4])
-        match_a = (a_clean in ev_away) or (ev_away in a_clean) or (a_clean[:4] == ev_away[:4])
+        # Algoritmo di similarità sui primi caratteri delle parole principali
+        h_match = (h_norm in ev_h_norm) or (ev_h_norm in h_norm) or (h_norm[:3] == ev_h_norm[:3])
+        a_match = (a_norm in ev_a_norm) or (ev_a_norm in a_norm) or (a_norm[:3] == ev_a_norm[:3])
 
-        if match_h and match_a:
+        if h_match and a_match:
             best_odd = 0.0
             for bookmaker in event.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
-                    # Mercato 1X2
+
+                    # Mercati Esito Finale (1, X, 2)
                     if market["key"] == "h2h" and market_target in ["1", "X", "2"]:
-                        target_name = (
-                            event["home_team"]
-                            if market_target == "1"
-                            else (
-                                event["away_team"]
-                                if market_target == "2"
-                                else "Draw"
-                            )
-                        )
                         for outcome in market.get("outcomes", []):
-                            if outcome["name"] == target_name:
+                            out_name = outcome.get("name", "")
+                            if market_target == "1" and outcome.get("name") == event.get("home_team"):
+                                best_odd = max(best_odd, float(outcome.get("price", 0)))
+                            elif market_target == "2" and outcome.get("name") == event.get("away_team"):
+                                best_odd = max(best_odd, float(outcome.get("price", 0)))
+                            elif market_target == "X" and out_name in ["Draw", "X"]:
                                 best_odd = max(best_odd, float(outcome.get("price", 0)))
 
-                    # Mercati Under/Over 2.5
+                    # Mercati Totali Gol
                     elif market["key"] == "totals":
                         for outcome in market.get("outcomes", []):
-                            if "OVER 2,5" in market_target and outcome["name"] == "Over" and outcome.get("point") == 2.5:
+                            point = outcome.get("point")
+                            name = outcome.get("name")
+                            if "OVER 2,5" in market_target and name == "Over" and point == 2.5:
                                 best_odd = max(best_odd, float(outcome.get("price", 0)))
-                            elif "UNDER 2,5" in market_target and outcome["name"] == "Under" and outcome.get("point") == 2.5:
+                            elif "UNDER 2,5" in market_target and name == "Under" and point == 2.5:
                                 best_odd = max(best_odd, float(outcome.get("price", 0)))
 
             return best_odd if best_odd > 0 else None
@@ -419,12 +421,12 @@ api_key = st.sidebar.text_input(
     help="Senza chiavi attive le quote non vengono caricate.",
 )
 
-odds_dataset = fetch_odds_from_api(api_key) if api_key else None
+odds_dataset = fetch_odds_from_api(api_key) if api_key else []
 
-if odds_dataset:
-    st.sidebar.success(f"⚡ Quote API connesse ({len(odds_dataset)} match trovati)")
+if len(odds_dataset) > 0:
+    st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match in memoria)")
 else:
-    st.sidebar.warning("⚠️ API Quote non connesse o quota limite esaurita.")
+    st.sidebar.warning("⚠️ Nessuna quota trovata dall'API. Verificare API Key.")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
     st.cache_data.clear()
