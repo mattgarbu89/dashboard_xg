@@ -2,6 +2,7 @@ import io
 import re
 import zipfile
 import difflib
+import unicodedata
 import pandas as pd
 import requests
 import streamlit as st
@@ -124,12 +125,19 @@ def split_teams_if_combined(val_casa, val_ospite):
     return s_casa, s_ospite
 
 
+def strip_accents(text):
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    return text.lower().strip()
+
+
 def clean_team_name(name):
     if not name or pd.isna(name):
         return ""
-    text = str(name).lower().strip()
     
-    # Normalizzazione abbreviazioni
+    text = strip_accents(str(name))
+    
+    # Normalizzazione abbreviazioni chiave
     replacements = {
         r"\butd\b": "united",
         r"\bu\.\b": "universidad ",
@@ -140,17 +148,21 @@ def clean_team_name(name):
         r"\bsc\b": "",
         r"\bcf\b": "",
         r"\bcd\b": "",
+        r"\brj\b": "",
+        r"\bsp\b": "",
+        r"\bmg\b": "",
+        r"\bpr\b": "",
     }
     for pat, repl in replacements.items():
         text = re.sub(pat, repl, text)
 
-    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"[^\w\s]", " ", text)
     stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real"]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
 
-def fuzzy_match_teams(t1, t2):
+def fuzzy_single_team(t1, t2):
     c1 = clean_team_name(t1)
     c2 = clean_team_name(t2)
     if not c1 or not c2:
@@ -159,12 +171,20 @@ def fuzzy_match_teams(t1, t2):
     if c1 == c2:
         return True
 
-    if len(c1) >= 4 and len(c2) >= 4:
-        if c1 in c2 or c2 in c1:
-            return True
+    # Se un nome è molto corto (es. CRB, Avai)
+    if len(c1) <= 4 or len(c2) <= 4:
+        return c1 == c2 or c1 in c2.split() or c2 in c1.split()
+
+    if c1 in c2 or c2 in c1:
+        return True
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.45
+    return ratio >= 0.55
+
+
+def is_match_pair(h1, a1, h2, a2):
+    # Entrambe le squadre devono corrispondere contemporaneamente
+    return fuzzy_single_team(h1, h2) and fuzzy_single_team(a1, a2)
 
 
 @st.cache_data(ttl=1800)
@@ -184,11 +204,11 @@ def fetch_all_active_odds(api_key):
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
             "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league",
-            "soccer_usa_mls", "soccer_norway_eliteserien", "soccer_brazil_campeonato", "soccer_chile_campeonato"
+            "soccer_usa_mls", "soccer_norway_eliteserien", "soccer_brazil_campeonato", 
+            "soccer_brazil_serie_b", "soccer_chile_campeonato", "soccer_iceland_urvalsdeild"
         ]
 
     all_odds = []
-    # Interroga tutte le leghe attive di calcio trovate
     for key in soccer_keys:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
@@ -268,7 +288,7 @@ def match_odds(home_team, away_team, market_target, odds_data):
         ev_home = event.get("home_team", "")
         ev_away = event.get("away_team", "")
 
-        if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
+        if is_match_pair(h_clean, a_clean, ev_home, ev_away):
             return extract_best_odd(event, market_target)
 
     return None
@@ -513,7 +533,7 @@ try:
                 for ev in odds_dataset:
                     ev_h = ev.get("home_team", "")
                     ev_a = ev.get("away_team", "")
-                    if fuzzy_match_teams(h_team, ev_h) and fuzzy_match_teams(a_team, ev_a):
+                    if is_match_pair(h_team, a_team, ev_h, ev_a):
                         found_match = "✅ TROVATA"
                         matched_with = f"{ev_h} vs {ev_a}"
                         break
