@@ -377,7 +377,6 @@ def calculate_delays(win_series):
         elif win == 1:
             temp_delay = 0
 
-    # Il ritardo attuale si basa sulla fine della serie
     for win in reversed(win_series.tolist()):
         if win == 0:
             current_delay += 1
@@ -432,14 +431,14 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
             if q_book:
                 q_book_list.append(str(round(q_book, 2)).replace(".", ","))
                 if q_book > quota_limite:
-                    semaforo_list.append("🟢 VALORE")
+                    semaforo_list.append("VALORE")
                 elif abs(q_book - quota_limite) <= 0.05:
-                    semaforo_list.append("🟡 FAIR")
+                    semaforo_list.append("FAIR")
                 else:
-                    semaforo_list.append("🔴 NO VALUE")
+                    semaforo_list.append("NO VALUE")
             else:
                 q_book_list.append("N/D")
-                semaforo_list.append("⚪ N/D")
+                semaforo_list.append("N/D")
 
         df_future["Quota Limite"] = str(round(quota_limite, 2)).replace(".", ",")
         df_future["Miglior Quota Bookmaker"] = q_book_list
@@ -492,9 +491,9 @@ api_key = st.sidebar.text_input(
 odds_dataset = fetch_all_active_odds(api_key) if api_key else []
 
 if len(odds_dataset) > 0:
-    st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match salvati)")
+    st.sidebar.success(f"Quote API Connesse ({len(odds_dataset)} match salvati)")
 else:
-    st.sidebar.warning("⚠️ Nessuna quota scaricata. Verifica API Key o disponibilità match.")
+    st.sidebar.warning("Nessuna quota scaricata. Verifica API Key o disponibilità match.")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
     st.cache_data.clear()
@@ -615,24 +614,22 @@ try:
                                 f"MM Precedente ({finestra_alert}p)": f"{str(round(mm_prev, 1)).replace('.', ',')}%",
                                 f"MM Attuale ({finestra_alert}p)": f"{str(round(mm_att, 1)).replace('.', ',')}%",
                                 "Rimbalzo": f"+{str(round(diff_bounce, 1)).replace('.', ',')}%",
-                                "Ultimo Esito": "✅ WIN",
+                                "Ultimo Esito": "WIN",
                             })
 
-            st.markdown("### 🚀 SEGNALI DI RIENTRO IN TREND (Bounce Back)")
+            st.markdown("### SEGNALI DI RIENTRO IN TREND (Bounce Back)")
             if alert_bounce_back:
-                st.success(f"🔥 Trovate {len(alert_bounce_back)} strategie con segnale di inversione di trend:")
                 st.dataframe(pd.DataFrame(alert_bounce_back), use_container_width=True)
             else:
                 st.info("Nessun segnale di rimbalzo attivo nell'ultimo match.")
 
             st.markdown("---")
 
-            st.markdown("### 🚨 STRATEGIE IN SOTTOPERFORMANCE")
+            st.markdown("### STRATEGIE IN SOTTOPERFORMANCE")
             if alert_underperforming:
-                st.warning(f"Trovate {len(alert_underperforming)} strategie sotto la baseline storica:")
                 st.dataframe(pd.DataFrame(alert_underperforming), use_container_width=True)
             else:
-                st.success("🎉 Tutte le strategie stabili sopra la media target.")
+                st.info("Tutte le strategie stabili sopra la media target.")
 
         else:
             st.sidebar.markdown("---")
@@ -650,7 +647,7 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO RITARDATORI E MEDIE MOBILI PER TESSERE METRICHE
+            # CALCOLO RITARDATORI E MEDIE MOBILI
             current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
 
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -668,13 +665,30 @@ try:
 
             st.subheader(f"📊 {strat_nome}")
 
-            # BLOCCO METRICHE DETTAGLIATE RESTAURATO
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Match Totali Giocati", f"{tot_match}")
-            col2.metric("Win Rate Reale", f"{str(round(win_rate_reale, 2)).replace('.', ',')}%")
-            col3.metric("Quota Fair Limite", f"{str(round(quota_limite, 2)).replace('.', ',')}")
-            col4.metric("Ritardo Attuale", f"{current_delay} match", delta=f"Max: {max_delay}", delta_color="inverse")
-            col5.metric(f"MM Attuale ({finestra_ma}p)", f"{str(round(mm_att, 1)).replace('.', ',')}%", delta=f"Min: {round(mm_min, 1)}% | Max: {round(mm_max, 1)}%")
+            # TABELLA RIASSUNTIVA METRICHE (PULITA, SENZA RIQUADRI O COLORI)
+            summary_data = {
+                "Parametro": [
+                    "Match Totali Giocati",
+                    "Win Rate Reale (%)",
+                    "Quota Fair / Limite",
+                    "Ritardo Attuale (Match)",
+                    "Ritardo Max Storico (Match)",
+                    f"MM Attuale ({finestra_ma} match)",
+                    f"MM Minima ({finestra_ma} match)",
+                    f"MM Massima ({finestra_ma} match)",
+                ],
+                "Valore": [
+                    str(tot_match),
+                    f"{str(round(win_rate_reale, 2)).replace('.', ',')}%",
+                    f"{str(round(quota_limite, 2)).replace('.', ',')}",
+                    str(current_delay),
+                    str(max_delay),
+                    f"{str(round(mm_att, 1)).replace('.', ',')}%",
+                    f"{str(round(mm_min, 1)).replace('.', ',')}%",
+                    f"{str(round(mm_max, 1)).replace('.', ',')}%",
+                ]
+            }
+            st.table(pd.DataFrame(summary_data))
 
             st.markdown("---")
 
