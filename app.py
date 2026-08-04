@@ -64,7 +64,7 @@ def load_clean_df(file_bytes):
 
     df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
 
-    cols_to_clean = ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]
+    cols_to_clean = ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE", "GOL CASA", "GOL OSPITE"]
     for col in cols_to_clean:
         if col in df.columns:
             df[col] = clean_numeric_column(df[col])
@@ -300,47 +300,69 @@ def evaluate_market(row, market):
     if pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
         return None
 
-    gc = row["GOL CASA"]
-    go = row["GOL OSPITE"]
+    gc = float(row["GOL CASA"])
+    go = float(row["GOL OSPITE"])
     gt = gc + go
+    m = str(market).upper().strip()
 
-    if market == "1":
+    # ESITI FINALI
+    if m == "1":
         return int(gc > go)
-    elif market == "X":
+    elif m == "X":
         return int(gc == go)
-    elif market == "2":
+    elif m == "2":
         return int(go > gc)
-    elif market == "1X":
+    elif m == "1X":
         return int(gc >= go)
-    elif market == "X2":
+    elif m == "X2":
         return int(go >= gc)
-    elif market == "12":
+    elif m == "12":
         return int(gc != go)
-    elif market == "ESITO 1-1":
+    elif m == "ESITO 1-1":
         return int(gc == 1 and go == 1)
-    elif market in ["OVER 1,5", "OVER 1.5"]:
+
+    # GOL / NO GOL
+    elif m == "GOL":
+        return int(gc > 0 and go > 0)
+    elif m in ["NO GOL", "NOGOL", "MOGOL"]:
+        return int(gc == 0 or go == 0)
+
+    # OVER / UNDER GENERALI
+    elif m in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
-    elif market in ["OVER 2,5", "OVER 2.5"]:
+    elif m in ["OVER 2,5", "OVER 2.5"]:
         return int(gt > 2.5)
-    elif market in ["OVER 3,5", "OVER 3.5"]:
+    elif m in ["OVER 3,5", "OVER 3.5"]:
         return int(gt > 3.5)
-    elif market in ["UNDER 1,5", "UNDER 1.5"]:
+    elif m in ["UNDER 1,5", "UNDER 1.5"]:
         return int(gt < 1.5)
-    elif market in ["UNDER 2,5", "UNDER 2.5"]:
+    elif m in ["UNDER 2,5", "UNDER 2.5"]:
         return int(gt < 2.5)
-    elif market in ["UNDER 3,5", "UNDER 3.5"]:
+    elif m in ["UNDER 3,5", "UNDER 3.5"]:
         return int(gt < 3.5)
-    elif market == "GOL CASA":
+
+    # MERCATI CASA
+    elif m == "GOL CASA":
         return int(gc > 0)
-    elif market == "OVER 1,5 CASA":
+    elif m in ["OVER 1,5 CASA", "OVER 1.5 CASA"]:
         return int(gc > 1.5)
-    elif market == "UNDER 1,5 CASA":
+    elif m in ["OVER 2,5 CASA", "OVER 2.5 CASA"]:
+        return int(gc > 2.5)
+    elif m in ["UNDER 1,5 CASA", "UNDER 1.5 CASA"]:
         return int(gc < 1.5)
-    elif market == "GOL OSPITE":
+    elif m in ["UNDER 2,5 CASA", "UNDER 2.5 CASA"]:
+        return int(gc < 2.5)
+
+    # MERCATI OSPITE
+    elif m == "GOL OSPITE":
         return int(go > 0)
-    elif market == "UNDER 1,5 OSPITE":
+    elif m in ["OVER 1,5 OSPITE", "OVER 1.5 OSPITE"]:
+        return int(go > 1.5)
+    elif m in ["OVER 2,5 OSPITE", "OVER 2.5 OSPITE"]:
+        return int(go > 2.5)
+    elif m in ["UNDER 1,5 OSPITE", "UNDER 1.5 OSPITE"]:
         return int(go < 1.5)
-    elif market == "UNDER 2,5 OSPITE":
+    elif m in ["UNDER 2,5 OSPITE", "UNDER 2.5 OSPITE"]:
         return int(go < 2.5)
 
     return 0
@@ -487,11 +509,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         df_future["Miglior Quota Bookmaker"] = q_book_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
-        # Formattazione con virgola delle colonne numeriche anche nella tabella delle prossime partite
-        for col_num in ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]:
-            if col_num in df_future.columns:
-                df_future[col_num] = df_future[col_num].apply(lambda x: format_num_comma(x))
-
         cols_finali = []
         for c in df_future.columns:
             if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
@@ -508,20 +525,13 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
         st.dataframe(df_future[cols_finali_clean], use_container_width=True)
     else:
-        st.info("Nessuna prossima partita trovata per questa strategia.")
+        st.info("Nessuna prossima partita trovata per questa selezione.")
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        df_played_display = df_played.copy()
-        
-        # Formattazione decimali con la virgola per tutte le colonne numeriche di output
-        for col_num in ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]:
-            if col_num in df_played_display.columns:
-                df_played_display[col_num] = df_played_display[col_num].apply(lambda x: format_num_comma(x))
-
         cols_played = [
             c
-            for c in df_played_display.columns
+            for c in df_played.columns
             if any(
                 k in str(c).upper()
                 for k in [
@@ -530,7 +540,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
             )
         ]
         st.dataframe(
-            df_played_display[cols_played].tail(15).iloc[::-1], use_container_width=True
+            df_played[cols_played].tail(15).iloc[::-1], use_container_width=True
         )
 
 
@@ -584,21 +594,36 @@ try:
         ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
         strat_map = {item["nome"]: item for item in ranked_strategies}
 
-        # --- SIDEBAR - SELEZIONI IN ALTO ---
-        st.sidebar.header("🎯 SELEZIONA STRATEGIA")
-        strat_nome = st.sidebar.selectbox("Strategia attiva:", list(strat_map.keys()))
+        # LISTA COMPLETA DEI MERCATI PER DATABASE TOTALE
+        MERCATI_TOTALI = [
+            "1", "X", "2", "1X", "X2", "12",
+            "GOL", "NO GOL",
+            "OVER 1,5", "OVER 2,5", "UNDER 1,5", "UNDER 2,5",
+            "GOL CASA", "OVER 1,5 CASA", "OVER 2,5 CASA", "UNDER 1,5 CASA", "UNDER 2,5 CASA",
+            "GOL OSPITE", "OVER 1,5 OSPITE", "OVER 2,5 OSPITE", "UNDER 1,5 OSPITE", "UNDER 2,5 OSPITE"
+        ]
 
-        st.sidebar.markdown("---")
+        # --- SIDEBAR - SELEZIONI IN ALTO ---
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
             [
                 "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
+                "📂 Database Totale (Analisi Mercati)",
             ],
         )
 
         st.sidebar.markdown("---")
+        if "📊" in modalita:
+            st.sidebar.header("🎯 SELEZIONA STRATEGIA")
+            strat_nome = st.sidebar.selectbox("Strategia attiva:", list(strat_map.keys()))
+            st.sidebar.markdown("---")
+        elif "📂" in modalita:
+            st.sidebar.header("🎯 SELEZIONA MERCATO TOTALE")
+            mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
+            st.sidebar.markdown("---")
+
         st.sidebar.header("🔑 Configurazione Odds API")
         api_key = st.sidebar.text_input(
             "API Key:",
@@ -697,7 +722,100 @@ try:
             else:
                 st.info("Tutte le strategie stabili sopra la media target.")
 
+        elif "📂" in modalita:
+            # === NUOVA MODALITÀ DATABASE TOTALE ===
+            st.subheader(f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`")
+
+            params_tot = {
+                "SOMMA": None, "DC": None, "C1": None, "C2": None,
+                "MEDIA CASA": None, "MEDIA OSPITE": None,
+                "MERCATO": mercato_totale_sel
+            }
+
+            df_tot = apply_filters(df_base, params_tot)
+            df_played = df_tot[df_tot["GOL CASA"].notna()].copy()
+            tot_match = len(df_played)
+
+            win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
+            quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
+
+            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
+
+            st.sidebar.markdown("---")
+            finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
+
+            mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
+            if tot_match >= finestra_ma:
+                df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma).mean() * 100
+                df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
+                
+                ma_valid = df_played["MA"].dropna()
+                if len(ma_valid) > 0:
+                    mm_att = ma_valid.iloc[-1]
+                    mm_min = ma_valid.min()
+                    mm_max = ma_valid.max()
+
+            with st.container(border=True):
+                st.markdown(get_combination_string(params_tot))
+
+            st.markdown("#### 📈 Metriche Principali (Database Completo)")
+
+            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
+            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            with r1_c1:
+                with st.container(border=True):
+                    st.caption("Match Totali Giocati")
+                    st.markdown(f"### {tot_match}")
+
+            with r1_c2:
+                with st.container(border=True):
+                    st.caption("Win Rate Reale (%)")
+                    st.markdown(f"### {format_num_comma(win_rate_reale)}%")
+
+            with r1_c3:
+                with st.container(border=True):
+                    st.caption("Quota Fair / Limite")
+                    st.markdown(f"### {format_num_comma(quota_limite)}")
+
+            with r1_c4:
+                with st.container(border=True):
+                    st.caption("Ritardo Attuale (Match)")
+                    st.markdown(f"### {current_delay}")
+
+            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+            with r2_c1:
+                with st.container(border=True):
+                    st.caption("Ritardo Max Storico (Match)")
+                    st.markdown(f"### {max_delay}")
+
+            with r2_c2:
+                with st.container(border=True):
+                    st.caption(f"MM Attuale ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
+
+            with r2_c3:
+                with st.container(border=True):
+                    st.caption(f"MM Minima ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c4:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
+
+            st.markdown("---")
+
+            if tot_match >= finestra_ma:
+                chart_data = pd.DataFrame({
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                })
+                st.line_chart(chart_data)
+
+            render_tables(df_tot, quota_limite, odds_dataset, mercato_totale_sel, col_casa, col_ospite)
+
         else:
+            # === MODALITÀ STRATEGIE SALVATE ===
             selected_item = strat_map[strat_nome]
             params = selected_item["params"]
             win_rate_storico = selected_item["win_rate_storico"]
