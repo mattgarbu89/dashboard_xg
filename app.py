@@ -529,16 +529,31 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        cols_played = [
-            c
-            for c in df_played.columns
+        # COSTRUZIONE DINAMICA DELLE COLONNE DA MOSTRARE PER ULTIME PARTITE PROCESSATE
+        cols_played = []
+
+        # 1. Data e Orario se presenti
+        for c in df_played.columns:
+            if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
+                if c not in cols_played:
+                    cols_played.append(c)
+
+        # 2. Forziamo SEMPRE le colonne Squadra Casa e Squadra Ospite scelte dall'utente
+        if col_casa and col_casa in df_played.columns and col_casa not in cols_played:
+            cols_played.append(col_casa)
+        if col_ospite and col_ospite in df_played.columns and col_ospite not in cols_played and col_ospite != col_casa:
+            cols_played.append(col_ospite)
+
+        # 3. Altre colonne rilevanti (Risultati, Parametri, WIN)
+        altre_cols = [
+            c for c in df_played.columns
             if any(
                 k in str(c).upper()
-                for k in [
-                    "DATA", "ORA", "CASA", "OSPITE", "GOL", "SOMMA", "DC", "C1", "C2", "WIN"
-                ]
-            )
+                for k in ["GOL CASA", "GOL OSPITE", "SOMMA", "DC", "C1", "C2", "WIN"]
+            ) and c not in cols_played
         ]
+        cols_played.extend(altre_cols)
+
         st.dataframe(
             df_played[cols_played].tail(15).iloc[::-1], use_container_width=True
         )
