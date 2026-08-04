@@ -665,30 +665,16 @@ try:
 
             st.subheader(f"📊 {strat_nome}")
 
-            # TABELLA RIASSUNTIVA METRICHE (PULITA, SENZA RIQUADRI O COLORI)
-            summary_data = {
-                "Parametro": [
-                    "Match Totali Giocati",
-                    "Win Rate Reale (%)",
-                    "Quota Fair / Limite",
-                    "Ritardo Attuale (Match)",
-                    "Ritardo Max Storico (Match)",
-                    f"MM Attuale ({finestra_ma} match)",
-                    f"MM Minima ({finestra_ma} match)",
-                    f"MM Massima ({finestra_ma} match)",
-                ],
-                "Valore": [
-                    str(tot_match),
-                    f"{str(round(win_rate_reale, 2)).replace('.', ',')}%",
-                    f"{str(round(quota_limite, 2)).replace('.', ',')}",
-                    str(current_delay),
-                    str(max_delay),
-                    f"{str(round(mm_att, 1)).replace('.', ',')}%",
-                    f"{str(round(mm_min, 1)).replace('.', ',')}%",
-                    f"{str(round(mm_max, 1)).replace('.', ',')}%",
-                ]
-            }
-            st.table(pd.DataFrame(summary_data))
+            # BLOCCO METRICHE PULITO (SENZA FRECCE COLORATE E SENZA TABELLE)
+            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+
+            col1.metric("Match Totali", f"{tot_match}")
+            col2.metric("Win Rate Reale", f"{str(round(win_rate_reale, 2)).replace('.', ',')}%")
+            col3.metric("Quota Fair", f"{str(round(quota_limite, 2)).replace('.', ',')}")
+            col4.metric("Ritardo Attuale", f"{current_delay}")
+            col5.metric("Ritardo Max", f"{max_delay}")
+            col6.metric(f"MM Att. ({finestra_ma}p)", f"{str(round(mm_att, 1)).replace('.', ',')}%")
+            col7.metric(f"MM Min / Max", f"{str(round(mm_min, 1)).replace('.', ',')}% / {str(round(mm_max, 1)).replace('.', ',')}%")
 
             st.markdown("---")
 
