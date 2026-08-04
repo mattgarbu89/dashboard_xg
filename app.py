@@ -129,7 +129,6 @@ def clean_team_name(name):
         return ""
     text = str(name).lower().strip()
     
-    # Normalizzazione abbreviazioni
     replacements = {
         r"\butd\b": "united",
         r"\bu\.\b": "universidad ",
@@ -174,21 +173,30 @@ def fetch_all_active_odds(api_key):
 
     sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
     try:
-        res_sports = requests.get(sports_url, timeout=5)
-        if res_sports.status_code != 200:
+        res_sports = requests.get(sports_url, timeout=10)
+        if res_sports.status_code == 401:
+            st.sidebar.error("❌ API Key non valida!")
             return []
+        elif res_sports.status_code == 429:
+            st.sidebar.error("⚠️ Crediti API esauriti!")
+            return []
+        elif res_sports.status_code != 200:
+            return []
+
+        requests_remaining = res_sports.headers.get("x-requests-remaining")
+        if requests_remaining:
+            st.sidebar.info(f"📊 Crediti API Rimanenti: {requests_remaining}")
+
         all_sports = res_sports.json()
         soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
     except Exception:
         soccer_keys = [
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
-            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league",
-            "soccer_usa_mls", "soccer_norway_eliteserien", "soccer_brazil_campeonato", "soccer_chile_campeonato"
+            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league"
         ]
 
     all_odds = []
-    # Interroga tutte le leghe attive di calcio trovate
     for key in soccer_keys:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
@@ -197,6 +205,9 @@ def fetch_all_active_odds(api_key):
                 data = res.json()
                 if isinstance(data, list):
                     all_odds.extend(data)
+            elif res.status_code == 429:
+                st.sidebar.error("⚠️ Quota chiamate API superata!")
+                break
         except Exception:
             continue
 
@@ -353,6 +364,29 @@ def apply_filters(df, params):
     return df_filtered
 
 
+def calculate_delays(win_series):
+    """Calcola il ritardo attuale e il ritardo massimo (consecutive losses)"""
+    current_delay = 0
+    max_delay = 0
+    temp_delay = 0
+
+    for win in win_series:
+        if win == 0:
+            temp_delay += 1
+            max_delay = max(max_delay, temp_delay)
+        elif win == 1:
+            temp_delay = 0
+
+    # Il ritardo attuale si basa sulla fine della serie
+    for win in reversed(win_series.tolist()):
+        if win == 0:
+            current_delay += 1
+        else:
+            break
+
+    return current_delay, max_delay
+
+
 def get_sorted_strategies(df_base, strategie_dict):
     ranked_strategies = []
     for name, params in strategie_dict.items():
@@ -493,41 +527,6 @@ try:
         col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
         col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
 
-        if st.sidebar.button("🔎 Esegui Diagnostica Matching"):
-            df_future_diag = df_base[df_base["GOL CASA"].isna()].copy()
-            df_future_diag = df_future_diag.dropna(subset=[col_casa], how="all")
-            
-            diag_results = []
-            for _, r in df_future_diag.iterrows():
-                v_casa = r.get(col_casa, "")
-                v_ospite = r.get(col_ospite, "")
-                
-                h_team, a_team = split_teams_if_combined(v_casa, v_ospite)
-                
-                if not h_team or h_team == "nan" or not a_team or a_team == "nan":
-                    continue
-
-                found_match = "❌ NESSUNA CORRISPONDENZA"
-                matched_with = ""
-                
-                for ev in odds_dataset:
-                    ev_h = ev.get("home_team", "")
-                    ev_a = ev.get("away_team", "")
-                    if fuzzy_match_teams(h_team, ev_h) and fuzzy_match_teams(a_team, ev_a):
-                        found_match = "✅ TROVATA"
-                        matched_with = f"{ev_h} vs {ev_a}"
-                        break
-                
-                diag_results.append({
-                    "Squadra Casa (Splittata)": h_team,
-                    "Squadra Ospite (Splittata)": a_team,
-                    "Esito Match API": found_match,
-                    "Match Corrispondente API": matched_with
-                })
-            
-            st.write("### 🛠️ Risultato Diagnostica Nomi")
-            st.dataframe(pd.DataFrame(diag_results), use_container_width=True)
-
         STRATEGIE_SALVATE = {
             "Esito X super combo 235 match 37.45%": {
                 "SOMMA": None, "DC": None, "C1": -1.5, "C1_OP": ">=", "C2": 0.0, "C2_OP": "<=", "MEDIA CASA": 1.0, "MEDIA_CASA_OP": ">=", "MEDIA OSPITE": 1.50, "MEDIA_OSPITE_OP": "<=", "MERCATO": "X",
@@ -651,18 +650,35 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            st.subheader(f"📊 {strat_nome}")
-            st.info(
-                f"🎯 **Win Rate Reale:** {str(round(win_rate_reale, 2)).replace('.', ',')}% | "
-                f"**Quota Limite Minima (Fair Odds):** {str(round(quota_limite, 2)).replace('.', ',')}"
-            )
+            # CALCOLO RITARDATORI E MEDIE MOBILI PER TESSERE METRICHE
+            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
 
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
 
+            mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
             if tot_match >= finestra_ma:
                 df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma).mean() * 100
                 df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
+                
+                ma_valid = df_played["MA"].dropna()
+                if len(ma_valid) > 0:
+                    mm_att = ma_valid.iloc[-1]
+                    mm_min = ma_valid.min()
+                    mm_max = ma_valid.max()
 
+            st.subheader(f"📊 {strat_nome}")
+
+            # BLOCCO METRICHE DETTAGLIATE RESTAURATO
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Match Totali Giocati", f"{tot_match}")
+            col2.metric("Win Rate Reale", f"{str(round(win_rate_reale, 2)).replace('.', ',')}%")
+            col3.metric("Quota Fair Limite", f"{str(round(quota_limite, 2)).replace('.', ',')}")
+            col4.metric("Ritardo Attuale", f"{current_delay} match", delta=f"Max: {max_delay}", delta_color="inverse")
+            col5.metric(f"MM Attuale ({finestra_ma}p)", f"{str(round(mm_att, 1)).replace('.', ',')}%", delta=f"Min: {round(mm_min, 1)}% | Max: {round(mm_max, 1)}%")
+
+            st.markdown("---")
+
+            if tot_match >= finestra_ma:
                 chart_data = pd.DataFrame({
                     f"Media Mobile ({finestra_ma} match)": df_played["MA"],
                     "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
