@@ -147,15 +147,12 @@ def clean_team_name(name):
         r"\bsc\b": "",
         r"\bcf\b": "",
         r"\bcd\b": "",
-        r"\bthór\b": "thor",
     }
     for pat, repl in replacements.items():
         text = re.sub(pat, repl, text)
 
     text = re.sub(r"[^\w\s]", " ", text)
-    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real"]
-    words = [w for w in text.split() if w not in stopwords]
-    return " ".join(words) if words else text
+    return text.strip()
 
 
 def fuzzy_single_team(t1, t2):
@@ -170,29 +167,15 @@ def fuzzy_single_team(t1, t2):
     words1 = set(c1.split())
     words2 = set(c2.split())
 
-    # Gestione specifica Botafogo SP / RJ / MG / PR
+    # Distinzione esclusiva per suffissi brasiliani (es. Botafogo SP vs Botafogo)
     suffixes = {"sp", "rj", "mg", "pr"}
     s1 = words1.intersection(suffixes)
     s2 = words2.intersection(suffixes)
-    if s1 and not s2:
+    if s1 != s2:
         return False
-    if s2 and not s1:
-        return False
-    if s1 and s2 and s1 != s2:
-        return False
-
-    # Rimozione parole generiche per evitare false sovrapposizioni (es. Derry City vs York City)
-    generic = {"city", "rovers", "united", "town", "athletic", "sporting", "fc", "sc", "union"}
-    unique1 = " ".join([w for w in words1 if w not in generic])
-    unique2 = " ".join([w for w in words2 if w not in generic])
-
-    if unique1 and unique2:
-        r_unq = difflib.SequenceMatcher(None, unique1, unique2).ratio()
-        if r_unq < 0.40 and unique1 not in unique2 and unique2 not in unique1:
-            return False
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.45 or c1 in c2 or c2 in c1
+    return ratio >= 0.55 or (len(c1) > 4 and c1 in c2) or (len(c2) > 4 and c2 in c1)
 
 
 def is_match_pair(h1, a1, h2, a2):
