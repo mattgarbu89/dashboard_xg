@@ -1,6 +1,7 @@
 import io
 import re
 import zipfile
+import difflib
 import pandas as pd
 import requests
 import streamlit as st
@@ -120,15 +121,28 @@ def detect_team_columns(df):
     return col_casa, col_ospite
 
 
-def normalize_string(text):
-    """Pulisce in modo aggressivo il nome della squadra per facilitare il matching."""
+def clean_team_string(text):
     if not text or pd.isna(text):
         return ""
     text = str(text).lower().strip()
     text = re.sub(r"[^\w\s]", "", text)
-    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1"]
+    stopwords = [
+        "fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk",
+        "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st"
+    ]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
+
+
+def are_teams_matching(t1, t2):
+    c1 = clean_team_string(t1)
+    c2 = clean_team_string(t2)
+    if not c1 or not c2:
+        return False
+    if c1 in c2 or c2 in c1:
+        return True
+    ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
+    return ratio >= 0.65
 
 
 @st.cache_data(ttl=1800)
@@ -153,10 +167,9 @@ def fetch_odds_from_api(api_key):
 
     all_odds = []
     for sport in sports:
-        # Chiamata separata per h2h e totals per evitare blocchi dell'API
         url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
-            res = requests.get(url, timeout=8)
+            res = requests.get(url, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 if isinstance(data, list):
@@ -170,47 +183,65 @@ def match_odds(home_team, away_team, market_target, odds_data):
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None
 
-    h_norm = normalize_string(home_team)
-    a_norm = normalize_string(away_team)
-
-    if not h_norm or not a_norm:
-        return None
+    m_target = str(market_target).upper().strip()
 
     for event in odds_data:
-        ev_h_norm = normalize_string(event.get("home_team", ""))
-        ev_a_norm = normalize_string(event.get("away_team", ""))
+        ev_home = event.get("home_team", "")
+        ev_away = event.get("away_team", "")
 
-        # Algoritmo di similarità sui primi caratteri delle parole principali
-        h_match = (h_norm in ev_h_norm) or (ev_h_norm in h_norm) or (h_norm[:3] == ev_h_norm[:3])
-        a_match = (a_norm in ev_a_norm) or (ev_a_norm in a_norm) or (a_norm[:3] == ev_a_norm[:3])
+        if are_teams_matching(home_team, ev_home) and are_teams_matching(away_team, ev_away):
+            odds_1, odds_x, odds_2 = None, None, None
+            over_25, under_25 = None, None
 
-        if h_match and a_match:
-            best_odd = 0.0
             for bookmaker in event.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
+                    key = market.get("key")
+                    outcomes = market.get("outcomes", [])
 
-                    # Mercati Esito Finale (1, X, 2)
-                    if market["key"] == "h2h" and market_target in ["1", "X", "2"]:
-                        for outcome in market.get("outcomes", []):
-                            out_name = outcome.get("name", "")
-                            if market_target == "1" and outcome.get("name") == event.get("home_team"):
-                                best_odd = max(best_odd, float(outcome.get("price", 0)))
-                            elif market_target == "2" and outcome.get("name") == event.get("away_team"):
-                                best_odd = max(best_odd, float(outcome.get("price", 0)))
-                            elif market_target == "X" and out_name in ["Draw", "X"]:
-                                best_odd = max(best_odd, float(outcome.get("price", 0)))
+                    if key == "h2h":
+                        for out in outcomes:
+                            price = float(out.get("price", 0))
+                            name = out.get("name", "")
+                            if name == ev_home:
+                                odds_1 = max(odds_1 or 0, price)
+                            elif name == ev_away:
+                                odds_2 = max(odds_2 or 0, price)
+                            elif name in ["Draw", "X"]:
+                                odds_x = max(odds_x or 0, price)
 
-                    # Mercati Totali Gol
-                    elif market["key"] == "totals":
-                        for outcome in market.get("outcomes", []):
-                            point = outcome.get("point")
-                            name = outcome.get("name")
-                            if "OVER 2,5" in market_target and name == "Over" and point == 2.5:
-                                best_odd = max(best_odd, float(outcome.get("price", 0)))
-                            elif "UNDER 2,5" in market_target and name == "Under" and point == 2.5:
-                                best_odd = max(best_odd, float(outcome.get("price", 0)))
+                    elif key == "totals":
+                        for out in outcomes:
+                            price = float(out.get("price", 0))
+                            point = float(out.get("point", 0))
+                            name = out.get("name", "")
+                            if point == 2.5:
+                                if name == "Over":
+                                    over_25 = max(over_25 or 0, price)
+                                elif name == "Under":
+                                    under_25 = max(under_25 or 0, price)
 
-            return best_odd if best_odd > 0 else None
+            # Estrazione quota in base al mercato richiesto
+            if m_target == "1":
+                return odds_1
+            elif m_target == "X":
+                return odds_x
+            elif m_target == "2":
+                return odds_2
+            elif m_target == "1X" and odds_1 and odds_x:
+                return round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
+            elif m_target == "X2" and odds_2 and odds_x:
+                return round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
+            elif m_target in ["OVER 2,5", "OVER 2.5"]:
+                return over_25
+            elif m_target in ["UNDER 2,5", "UNDER 2.5", "UNDER 2,5 OSPITE"]:
+                return under_25
+            elif m_target == "ESITO 1-1":
+                # Fallback per mercati risultato esatto: usa la quota pareggio come riferimento
+                return odds_x
+
+            # Se il mercato è generico o non mappato direttamente, restituisce l'esito 1X2 principale
+            return odds_1 or odds_x or odds_2
+
     return None
 
 
@@ -236,34 +267,26 @@ def evaluate_market(row, market):
         return int(gc != go)
     elif market == "ESITO 1-1":
         return int(gc == 1 and go == 1)
-    elif market == "OVER 1,5":
+    elif market in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
-    elif market == "OVER 2,5":
+    elif market in ["OVER 2,5", "OVER 2.5"]:
         return int(gt > 2.5)
-    elif market == "OVER 3,5":
+    elif market in ["OVER 3,5", "OVER 3.5"]:
         return int(gt > 3.5)
-    elif market == "UNDER 1,5":
+    elif market in ["UNDER 1,5", "UNDER 1.5"]:
         return int(gt < 1.5)
-    elif market == "UNDER 2,5":
+    elif market in ["UNDER 2,5", "UNDER 2.5"]:
         return int(gt < 2.5)
-    elif market == "UNDER 3,5":
+    elif market in ["UNDER 3,5", "UNDER 3.5"]:
         return int(gt < 3.5)
     elif market == "GOL CASA":
         return int(gc > 0)
     elif market == "OVER 1,5 CASA":
         return int(gc > 1.5)
-    elif market == "OVER 2,5 CASA":
-        return int(gc > 2.5)
     elif market == "UNDER 1,5 CASA":
         return int(gc < 1.5)
-    elif market == "UNDER 2,5 CASA":
-        return int(gc < 2.5)
     elif market == "GOL OSPITE":
         return int(go > 0)
-    elif market == "OVER 1,5 OSPITE":
-        return int(go > 1.5)
-    elif market == "OVER 2,5 OSPITE":
-        return int(go > 2.5)
     elif market == "UNDER 1,5 OSPITE":
         return int(go < 1.5)
     elif market == "UNDER 2,5 OSPITE":
@@ -415,18 +438,19 @@ st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
 # Sidebar - Configurazione API Key
 st.sidebar.header("🔑 Configurazione Odds API")
 api_key = st.sidebar.text_input(
-    "API Key (Modificabile):",
+    "API Key:",
     value=ODDS_API_KEY_DEFAULT,
     type="password",
-    help="Senza chiavi attive le quote non vengono caricate.",
 )
 
 odds_dataset = fetch_odds_from_api(api_key) if api_key else []
 
 if len(odds_dataset) > 0:
     st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match in memoria)")
+    with st.sidebar.expander("🔍 Match in memoria (Debug)"):
+        st.write([f"{m.get('home_team')} vs {m.get('away_team')}" for m in odds_dataset[:15]])
 else:
-    st.sidebar.warning("⚠️ Nessuna quota trovata dall'API. Verificare API Key.")
+    st.sidebar.warning("⚠️ Nessuna quota trovata. Verificare chiave o limite API.")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
     st.cache_data.clear()
