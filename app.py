@@ -209,7 +209,7 @@ def fetch_all_active_odds(api_key):
 
     all_odds = []
     for key in soccer_keys:
-        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals,btts&oddsFormat=decimal"
+        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
             if res.status_code == 200:
@@ -231,10 +231,7 @@ def extract_best_odd(event, market_target):
     ev_away = event.get("away_team", "")
 
     odds_1, odds_x, odds_2 = None, None, None
-    over_15, under_15 = None, None
     over_25, under_25 = None, None
-    over_35, under_35 = None, None
-    btts_yes, btts_no = None, None
 
     for bookmaker in event.get("bookmakers", []):
         for market in bookmaker.get("markets", []):
@@ -257,30 +254,11 @@ def extract_best_odd(event, market_target):
                     price = float(out.get("price", 0))
                     point = float(out.get("point", 0))
                     name = out.get("name", "")
-                    if point == 1.5:
-                        if name == "Over":
-                            over_15 = max(over_15 or 0, price)
-                        elif name == "Under":
-                            under_15 = max(under_15 or 0, price)
-                    elif point == 2.5:
+                    if point == 2.5:
                         if name == "Over":
                             over_25 = max(over_25 or 0, price)
                         elif name == "Under":
                             under_25 = max(under_25 or 0, price)
-                    elif point == 3.5:
-                        if name == "Over":
-                            over_35 = max(over_35 or 0, price)
-                        elif name == "Under":
-                            under_35 = max(under_35 or 0, price)
-
-            elif key == "btts":
-                for out in outcomes:
-                    price = float(out.get("price", 0))
-                    name = out.get("name", "")
-                    if name in ["Yes", "Si", "GOL"]:
-                        btts_yes = max(btts_yes or 0, price)
-                    elif name in ["No", "NOGOL"]:
-                        btts_no = max(btts_no or 0, price)
 
     if m_target == "1":
         return odds_1
@@ -292,22 +270,10 @@ def extract_best_odd(event, market_target):
         return round(1 / ((1 / odds_1) + (1 / odds_x)), 2) if (odds_1 and odds_x) else odds_1
     elif m_target == "X2":
         return round(1 / ((1 / odds_2) + (1 / odds_x)), 2) if (odds_2 and odds_x) else odds_2
-    elif m_target in ["OVER 1,5", "OVER 1.5"]:
-        return over_15
-    elif m_target in ["UNDER 1,5", "UNDER 1.5"]:
-        return under_15
-    elif m_target in ["OVER 2,5", "OVER 2.5"]:
+    elif "OVER" in m_target:
         return over_25
-    elif m_target in ["UNDER 2,5", "UNDER 2.5"]:
+    elif "UNDER" in m_target:
         return under_25
-    elif m_target in ["OVER 3,5", "OVER 3.5"]:
-        return over_35
-    elif m_target in ["UNDER 3,5", "UNDER 3.5"]:
-        return under_35
-    elif m_target in ["GOL", "GG"]:
-        return btts_yes
-    elif m_target in ["NOGOL", "NG"]:
-        return btts_no
     elif m_target == "ESITO 1-1":
         return odds_x
 
@@ -334,53 +300,48 @@ def evaluate_market(row, market):
     if pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
         return None
 
-    gc = float(row["GOL CASA"])
-    go = float(row["GOL OSPITE"])
+    gc = row["GOL CASA"]
+    go = row["GOL OSPITE"]
     gt = gc + go
-    m = str(market).upper().strip()
 
-    if m == "1":
+    if market == "1":
         return int(gc > go)
-    elif m == "X":
+    elif market == "X":
         return int(gc == go)
-    elif m == "2":
+    elif market == "2":
         return int(go > gc)
-    elif m == "1X":
+    elif market == "1X":
         return int(gc >= go)
-    elif m == "X2":
+    elif market == "X2":
         return int(go >= gc)
-    elif m == "12":
+    elif market == "12":
         return int(gc != go)
-    elif m == "ESITO 1-1":
+    elif market == "ESITO 1-1":
         return int(gc == 1 and go == 1)
-    elif m in ["OVER 1,5", "OVER 1.5"]:
+    elif market in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
-    elif m in ["OVER 2,5", "OVER 2.5"]:
+    elif market in ["OVER 2,5", "OVER 2.5"]:
         return int(gt > 2.5)
-    elif m in ["OVER 3,5", "OVER 3.5"]:
+    elif market in ["OVER 3,5", "OVER 3.5"]:
         return int(gt > 3.5)
-    elif m in ["UNDER 1,5", "UNDER 1.5"]:
+    elif market in ["UNDER 1,5", "UNDER 1.5"]:
         return int(gt < 1.5)
-    elif m in ["UNDER 2,5", "UNDER 2.5"]:
+    elif market in ["UNDER 2,5", "UNDER 2.5"]:
         return int(gt < 2.5)
-    elif m in ["UNDER 3,5", "UNDER 3.5"]:
+    elif market in ["UNDER 3,5", "UNDER 3.5"]:
         return int(gt < 3.5)
-    elif m in ["GOL CASA", "GOL_CASA"]:
+    elif market == "GOL CASA":
         return int(gc > 0)
-    elif m in ["OVER 1,5 CASA", "OVER 1.5 CASA"]:
+    elif market == "OVER 1,5 CASA":
         return int(gc > 1.5)
-    elif m in ["UNDER 1,5 CASA", "UNDER 1.5 CASA"]:
+    elif market == "UNDER 1,5 CASA":
         return int(gc < 1.5)
-    elif m in ["GOL OSPITE", "GOL_OSPITE"]:
+    elif market == "GOL OSPITE":
         return int(go > 0)
-    elif m in ["UNDER 1,5 OSPITE", "UNDER 1.5 OSPITE"]:
+    elif market == "UNDER 1,5 OSPITE":
         return int(go < 1.5)
-    elif m in ["UNDER 2,5 OSPITE", "UNDER 2.5 OSPITE"]:
+    elif market == "UNDER 2,5 OSPITE":
         return int(go < 2.5)
-    elif m in ["GOL", "GG", "GOAL"]:
-        return int(gc > 0 and go > 0)
-    elif m in ["NOGOL", "NG", "NO GOAL"]:
-        return int(gc == 0 or go == 0)
 
     return 0
 
@@ -606,18 +567,6 @@ try:
             "Esito und 2,5 ospite 248 match 90.3%": {
                 "SOMMA": None, "DC": None, "C1": None, "C2": -4.0, "C2_OP": "<=", "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "UNDER 2,5 OSPITE",
             },
-            "Gol Casa (C1 >= 4.0)": {
-                "SOMMA": None, "DC": None, "C1": 4.0, "C1_OP": ">=", "C2": None, "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "GOL CASA",
-            },
-            "Under 1.5 Casa (C1 <= -4.0)": {
-                "SOMMA": None, "DC": None, "C1": -4.0, "C1_OP": "<=", "C2": None, "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "UNDER 1,5 CASA",
-            },
-            "Gol Ospite (C2 >= 4.0)": {
-                "SOMMA": None, "DC": None, "C1": None, "C2": 4.0, "C2_OP": ">=", "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "GOL OSPITE",
-            },
-            "Under 1.5 Ospite (C2 <= -4.0)": {
-                "SOMMA": None, "DC": None, "C1": None, "C2": -4.0, "C2_OP": "<=", "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": "UNDER 1,5 OSPITE",
-            },
         }
 
         ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
@@ -634,7 +583,6 @@ try:
             [
                 "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
-                "🧪 Crea / Testa Nuova Strategia",
             ],
         )
 
@@ -736,99 +684,6 @@ try:
                 st.dataframe(pd.DataFrame(alert_underperforming), use_container_width=True)
             else:
                 st.info("Tutte le strategie stabili sopra la media target.")
-
-        elif "🧪" in modalita:
-            st.subheader("🧪 Crea e Testa una Nuova Strategia Personalizzata")
-
-            with st.expander("⚙️ Pannello Impostazioni Filtri Strategia", expanded=True):
-                col_m1, col_m2 = st.columns(2)
-                with col_m1:
-                    mercato_custom = st.selectbox(
-                        "Seleziona Mercato Target:",
-                        [
-                            "1", "X", "2", "1X", "X2", "12",
-                            "GOL CASA", "UNDER 1,5 CASA", "OVER 1,5 CASA",
-                            "GOL OSPITE", "UNDER 1,5 OSPITE", "UNDER 2,5 OSPITE",
-                            "OVER 1,5", "OVER 2,5", "OVER 3,5",
-                            "UNDER 1,5", "UNDER 2,5", "UNDER 3,5",
-                            "GOL", "NOGOL", "ESITO 1-1"
-                        ]
-                    )
-
-                st.markdown("---")
-                st.markdown("#### Configurazione Parametri (Lascia disattivato per ignorare)")
-
-                params_custom = {"MERCATO": mercato_custom}
-
-                def build_param_row(label, key_name):
-                    c1, c2, c3 = st.columns([1, 1, 2])
-                    with c1:
-                        use_filter = st.checkbox(f"Filtra {label}", key=f"chk_{key_name}")
-                    with c2:
-                        op = st.selectbox("Op", [">=", "<=", ">", "<", "=="], key=f"op_{key_name}")
-                    with c3:
-                        val = st.number_input(f"Valore {label}", value=0.0, step=0.1, key=f"val_{key_name}")
-
-                    if use_filter:
-                        params_custom[key_name] = val
-                        params_custom[f"{key_name}_OP"] = op
-                    else:
-                        params_custom[key_name] = None
-
-                build_param_row("SOMMA (C1 + C2)", "SOMMA")
-                build_param_row("DC (Differenza C1 - C2)", "DC")
-                build_param_row("C1 (Casa)", "C1")
-                build_param_row("C2 (Ospite)", "C2")
-                build_param_row("MEDIA CASA", "MEDIA CASA")
-                build_param_row("MEDIA OSPITE", "MEDIA OSPITE")
-
-            df_strat = apply_filters(df_base, params_custom)
-            df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
-            tot_match = len(df_played)
-
-            win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
-            quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
-            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
-
-            st.markdown("#### 📈 Risultati Test Strategie Personalizzate")
-
-            with st.container(border=True):
-                st.markdown(get_combination_string(params_custom))
-
-            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-            with r1_c1:
-                with st.container(border=True):
-                    st.caption("Match Totali Giocati")
-                    st.markdown(f"### {tot_match}")
-
-            with r1_c2:
-                with st.container(border=True):
-                    st.caption("Win Rate Reale (%)")
-                    st.markdown(f"### {format_num_comma(win_rate_reale)}%")
-
-            with r1_c3:
-                with st.container(border=True):
-                    st.caption("Quota Fair / Limite")
-                    st.markdown(f"### {format_num_comma(quota_limite)}")
-
-            with r1_c4:
-                with st.container(border=True):
-                    st.caption("Ritardo Attuale (Match)")
-                    st.markdown(f"### {current_delay}")
-
-            finestra_ma_custom = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
-
-            if tot_match >= finestra_ma_custom:
-                df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma_custom).mean() * 100
-                df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
-
-                chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma_custom} match)": df_played["MA"],
-                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
-                })
-                st.line_chart(chart_data)
-
-            render_tables(df_strat, quota_limite, odds_dataset, params_custom["MERCATO"], col_casa, col_ospite)
 
         else:
             selected_item = strat_map[strat_nome]
