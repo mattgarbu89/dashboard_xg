@@ -6,7 +6,6 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Configurazione pagina
 st.set_page_config(
     page_title="Dashboard Analisi xG & Value Bet Finder",
     page_icon="⚽",
@@ -129,8 +128,24 @@ def clean_team_name(name):
     if not name or pd.isna(name):
         return ""
     text = str(name).lower().strip()
+    
+    # Normalizzazione abbreviazioni
+    replacements = {
+        r"\butd\b": "united",
+        r"\bu\.\b": "universidad ",
+        r"\bdep\.\b": "deportes ",
+        r"\bst\.\b": "saint ",
+        r"\bac\b": "",
+        r"\bfc\b": "",
+        r"\bsc\b": "",
+        r"\bcf\b": "",
+        r"\bcd\b": "",
+    }
+    for pat, repl in replacements.items():
+        text = re.sub(pat, repl, text)
+
     text = re.sub(r"[^\w\s]", "", text)
-    stopwords = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk", "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "st", "city", "utd", "united", "town"]
+    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real"]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
@@ -149,7 +164,7 @@ def fuzzy_match_teams(t1, t2):
             return True
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.65
+    return ratio >= 0.45
 
 
 @st.cache_data(ttl=1800)
@@ -168,11 +183,13 @@ def fetch_all_active_odds(api_key):
         soccer_keys = [
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
-            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league"
+            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league",
+            "soccer_usa_mls", "soccer_norway_eliteserien", "soccer_brazil_campeonato", "soccer_chile_campeonato"
         ]
 
     all_odds = []
-    for key in soccer_keys[:30]:
+    # Interroga tutte le leghe attive di calcio trovate
+    for key in soccer_keys:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
