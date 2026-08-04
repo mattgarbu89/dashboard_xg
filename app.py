@@ -64,7 +64,6 @@ def load_clean_df(file_bytes):
   # Formattazione e pulizia delle colonne Data e Orario
   for col in df.columns:
     if "DATA" in col.upper():
-      # Estrae solo la parte data senza orario
       df[col] = (
           pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
       ).fillna(df[col])
@@ -153,7 +152,7 @@ def apply_filters(df, params):
     if val is not None and col in df.columns:
       op_str = params.get(f"{col}_OP", ">=")
       if col == "C2" and f"{col}_OP" not in params:
-        op_str = "<="  # Fallback retrocompatibilità per strategie salvate
+        op_str = "<="  # Fallback retrocompatibilità
       if col == "MEDIA OSPITE" and f"{col}_OP" not in params:
         op_str = params.get("MEDIA_OSPITE_OP", "<=")
 
@@ -438,9 +437,11 @@ try:
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
+        # Calcolo Media Mobile e Frequenza Cumulativa Dinamica Progressiva
         df_played["MA"] = (
             df_played["WIN"].rolling(window=finestra_ma).mean() * 100
         )
+        df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
 
         rit_att, rit_max, curr_r = 0, 0, 0
         for res in df_played["WIN"]:
@@ -472,7 +473,8 @@ try:
 
         chart_data = pd.DataFrame({
             f"Media Mobile ({finestra_ma} match)": df_played["MA"],
-            "Frequenza Cumulativa Totale": freq_cum,
+            "Frequenza Cumulativa Progressiva": df_played["FREQ_CUM_DINAMICA"],
+            "Media Finale Totale": freq_cum,
         })
         st.line_chart(chart_data)
 
@@ -502,7 +504,6 @@ try:
 
         manual_params = {"MERCATO": mercato_target}
 
-        # Configurazione lista parametri personalizzati: (Nome Colonna, Etichetta Visualizzata, Valore Default, Operatore Default)
         metriche = [
             ("C1", "C1 (Scarto Casa)", -1.00, ">="),
             ("C2", "C2 (Scarto Ospite)", 0.00, "<="),
@@ -551,9 +552,11 @@ try:
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
+        # Calcolo Media Mobile e Frequenza Cumulativa Dinamica Progressiva
         df_played["MA"] = (
             df_played["WIN"].rolling(window=finestra_ma).mean() * 100
         )
+        df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
 
         rit_att, rit_max, curr_r = 0, 0, 0
         for res in df_played["WIN"]:
@@ -585,7 +588,8 @@ try:
 
         chart_data = pd.DataFrame({
             f"Media Mobile ({finestra_ma} match)": df_played["MA"],
-            "Frequenza Cumulativa Totale": freq_cum,
+            "Frequenza Cumulativa Progressiva": df_played["FREQ_CUM_DINAMICA"],
+            "Media Finale Totale": freq_cum,
         })
         st.line_chart(chart_data)
 
