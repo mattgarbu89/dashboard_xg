@@ -27,7 +27,6 @@ def get_drive_direct_url(url):
 
 
 def clean_numeric_column(series):
-    """Converte una colonna in numeri gestendo virgole e punti decimali."""
     return pd.to_numeric(series.astype(str).str.replace(",", "."), errors="coerce")
 
 
@@ -74,10 +73,8 @@ def load_clean_df(file_bytes):
 
 
 def detect_team_columns(df):
-    """Individua con precisione le colonne con i nomi delle squadre nel dataframe."""
     col_casa, col_ospite = None, None
 
-    # Controllo corrispondenze esatte
     for c in df.columns:
         c_clean = str(c).upper().strip()
         if c_clean in [
@@ -100,7 +97,6 @@ def detect_team_columns(df):
         ]:
             col_ospite = c
 
-    # Ricerca euristica secondaria se non trovate
     if not col_casa:
         for c in df.columns:
             c_clean = str(c).upper().strip()
@@ -124,9 +120,19 @@ def detect_team_columns(df):
     return col_casa, col_ospite
 
 
+def clean_team_name(name):
+    """Semplifica e pulisce il nome della squadra per il matching."""
+    if not name or pd.isna(name):
+        return ""
+    name_str = str(name).lower().strip()
+    # Rimuove prefissi e suffissi societari comuni
+    words_to_remove = ["fc", "ac", "sc", "cf", "ssc", "as", "us", "cd", "ud", "fk", "bk"]
+    words = [w for w in re.split(r"\W+", name_str) if w not in words_to_remove and len(w) > 0]
+    return " ".join(words)
+
+
 @st.cache_data(ttl=1800)
 def fetch_odds_from_api(api_key):
-    """Scarica le quote in tempo reale da The Odds API per i principali campionati."""
     if not api_key:
         return None
 
@@ -141,6 +147,8 @@ def fetch_odds_from_api(api_key):
         "soccer_belgium_first_div",
         "soccer_brazil_campeonato",
         "soccer_argentina_primera_division",
+        "soccer_uefa_champs_league",
+        "soccer_uefa_europa_league",
     ]
 
     all_odds = []
@@ -156,30 +164,28 @@ def fetch_odds_from_api(api_key):
 
 
 def match_odds(home_team, away_team, market_target, odds_data):
-    """Mappa il match con il database quote dell'API e restituisce la quota migliore."""
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None
 
-    home_clean = str(home_team).lower().strip()
-    away_clean = str(away_team).lower().strip()
+    h_clean = clean_team_name(home_team)
+    a_clean = clean_team_name(away_team)
+
+    if not h_clean or not a_clean:
+        return None
 
     for event in odds_data:
-        ev_home = event.get("home_team", "").lower()
-        ev_away = event.get("away_team", "").lower()
+        ev_home = clean_team_name(event.get("home_team", ""))
+        ev_away = clean_team_name(event.get("away_team", ""))
 
-        if (
-            home_clean in ev_home
-            or ev_home in home_clean
-            or home_clean[:4] in ev_home
-        ) and (
-            away_clean in ev_away
-            or ev_away in away_clean
-            or away_clean[:4] in ev_away
-        ):
+        # Matching flessibile
+        match_h = (h_clean in ev_home) or (ev_home in h_clean) or (h_clean[:4] == ev_home[:4])
+        match_a = (a_clean in ev_away) or (ev_away in a_clean) or (a_clean[:4] == ev_away[:4])
 
+        if match_h and match_a:
             best_odd = 0.0
             for bookmaker in event.get("bookmakers", []):
                 for market in bookmaker.get("markets", []):
+                    # Mercato 1X2
                     if market["key"] == "h2h" and market_target in ["1", "X", "2"]:
                         target_name = (
                             event["home_team"]
@@ -192,12 +198,15 @@ def match_odds(home_team, away_team, market_target, odds_data):
                         )
                         for outcome in market.get("outcomes", []):
                             if outcome["name"] == target_name:
-                                best_odd = max(best_odd, outcome.get("price", 0))
+                                best_odd = max(best_odd, float(outcome.get("price", 0)))
 
-                    elif market["key"] == "totals" and "OVER 2,5" in market_target:
+                    # Mercati Under/Over 2.5
+                    elif market["key"] == "totals":
                         for outcome in market.get("outcomes", []):
-                            if outcome["name"] == "Over" and outcome.get("point") == 2.5:
-                                best_odd = max(best_odd, outcome.get("price", 0))
+                            if "OVER 2,5" in market_target and outcome["name"] == "Over" and outcome.get("point") == 2.5:
+                                best_odd = max(best_odd, float(outcome.get("price", 0)))
+                            elif "UNDER 2,5" in market_target and outcome["name"] == "Under" and outcome.get("point") == 2.5:
+                                best_odd = max(best_odd, float(outcome.get("price", 0)))
 
             return best_odd if best_odd > 0 else None
     return None
@@ -350,7 +359,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
         df_future["Miglior Quota Bookmaker"] = q_book_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
-        # Costruzione sicura della sequenza di colonne
         cols_finali = []
         for c in df_future.columns:
             if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
@@ -362,7 +370,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target):
         if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali:
             cols_finali.append(col_ospite)
 
-        # Se per qualsiasi motivo non individua col_casa/col_ospite, include le prime colonne del df
         if not col_casa and not col_ospite:
             for c in df_future.columns[:6]:
                 if c not in cols_finali and c not in ["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"]:
