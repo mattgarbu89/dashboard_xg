@@ -274,9 +274,31 @@ try:
     ]
 
     # ==========================================
-    # STRATEGIE SALVATE
+    # STRATEGIE SALVATE (ORDINATE PER WIN RATE)
     # ==========================================
     STRATEGIE_SALVATE = {
+        "Esito und 2,5 ospite 248 match 90.3%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": -4.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": None,
+            "MERCATO": "UNDER 2,5 OSPITE",
+        },
+        "Esito X 200 match 38%": {
+            "SOMMA": -0.79,
+            "SOMMA_OP": ">=",
+            "DC": None,
+            "C1": None,
+            "C2": None,
+            "MEDIA CASA": 1.1,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.51,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
+        },
         "Esito X super combo 235 match 37.45%": {
             "SOMMA": None,
             "DC": None,
@@ -285,29 +307,6 @@ try:
             "C2": 0.0,
             "C2_OP": "<=",
             "MEDIA CASA": 1.0,
-            "MEDIA_CASA_OP": ">=",
-            "MEDIA OSPITE": 1.50,
-            "MEDIA_OSPITE_OP": "<=",
-            "MERCATO": "X",
-        },
-        "Esito X 300 match 36.33%": {
-            "SOMMA": None,
-            "DC": None,
-            "C1": -1.5,
-            "C1_OP": ">=",
-            "C2": 1.0,
-            "C2_OP": "<=",
-            "MEDIA CASA": None,
-            "MEDIA OSPITE": 1.50,
-            "MEDIA_OSPITE_OP": "<=",
-            "MERCATO": "X",
-        },
-        "Esito X 406 match 34.24%": {
-            "SOMMA": None,
-            "DC": None,
-            "C1": None,
-            "C2": None,
-            "MEDIA CASA": 1.1,
             "MEDIA_CASA_OP": ">=",
             "MEDIA OSPITE": 1.50,
             "MEDIA_OSPITE_OP": "<=",
@@ -324,15 +323,15 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "Esito X 200 match 38%": {
-            "SOMMA": -0.79,
-            "SOMMA_OP": ">=",
+        "Esito X 300 match 36.33%": {
+            "SOMMA": None,
             "DC": None,
-            "C1": None,
-            "C2": None,
-            "MEDIA CASA": 1.1,
-            "MEDIA_CASA_OP": ">=",
-            "MEDIA OSPITE": 1.51,
+            "C1": -1.5,
+            "C1_OP": ">=",
+            "C2": 1.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": 1.50,
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
@@ -348,6 +347,17 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
+        "Esito X 406 match 34.24%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": None,
+            "MEDIA CASA": 1.1,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
+        },
         "Esito 1-1 436 match 17.9%": {
             "SOMMA": None,
             "DC": None,
@@ -358,16 +368,6 @@ try:
             "MEDIA OSPITE": 1.50,
             "MEDIA_OSPITE_OP": "<",
             "MERCATO": "ESITO 1-1",
-        },
-        "Esito und 2,5 ospite 248 match 90.3%": {
-            "SOMMA": None,
-            "DC": None,
-            "C1": None,
-            "C2": -4.0,
-            "C2_OP": "<=",
-            "MEDIA CASA": None,
-            "MEDIA OSPITE": None,
-            "MERCATO": "UNDER 2,5 OSPITE",
         },
     }
 
