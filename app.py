@@ -167,7 +167,6 @@ def fuzzy_single_team(t1, t2):
     words1 = set(c1.split())
     words2 = set(c2.split())
 
-    # Distinzione esclusiva per suffissi brasiliani (es. Botafogo SP vs Botafogo)
     suffixes = {"sp", "rj", "mg", "pr"}
     s1 = words1.intersection(suffixes)
     s2 = words2.intersection(suffixes)
@@ -175,7 +174,7 @@ def fuzzy_single_team(t1, t2):
         return False
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.55 or (len(c1) > 4 and c1 in c2) or (len(c2) > 4 and c2 in c1)
+    return ratio >= 0.50 or c1 in c2 or c2 in c1
 
 
 def is_match_pair(h1, a1, h2, a2):
@@ -185,16 +184,23 @@ def is_match_pair(h1, a1, h2, a2):
 @st.cache_data(ttl=1800)
 def fetch_all_active_odds(api_key):
     if not api_key:
-        return []
+        return [], "Chiave API mancante."
 
+    soccer_keys = []
     sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
     try:
-        res_sports = requests.get(sports_url, timeout=5)
-        if res_sports.status_code != 200:
-            return []
-        all_sports = res_sports.json()
-        soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
-    except Exception:
+        res_sports = requests.get(sports_url, timeout=8)
+        if res_sports.status_code == 200:
+            all_sports = res_sports.json()
+            soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
+        elif res_sports.status_code == 401:
+            return [], "API Key non valida o non autorizzata (Errore 401)."
+        elif res_sports.status_code == 429:
+            return [], "Limite chiamate API superato (Errore 429)."
+    except Exception as e:
+        pass
+
+    if not soccer_keys:
         soccer_keys = [
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
@@ -205,18 +211,26 @@ def fetch_all_active_odds(api_key):
         ]
 
     all_odds = []
+    errors_count = 0
+
     for key in soccer_keys:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
-            res = requests.get(url, timeout=5)
+            res = requests.get(url, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 if isinstance(data, list):
                     all_odds.extend(data)
+            else:
+                errors_count += 1
         except Exception:
+            errors_count += 1
             continue
 
-    return all_odds
+    if not all_odds and errors_count > 0:
+        return [], "Problema di rete o risposta vuota dall'API per le leghe."
+
+    return all_odds, "OK"
 
 
 def extract_best_odd(event, market_target):
@@ -471,12 +485,12 @@ api_key = st.sidebar.text_input(
     type="password",
 )
 
-odds_dataset = fetch_all_active_odds(api_key) if api_key else []
+odds_dataset, api_msg = fetch_all_active_odds(api_key) if api_key else ([], "API Key assente.")
 
 if len(odds_dataset) > 0:
     st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match salvati)")
 else:
-    st.sidebar.warning("⚠️ Nessuna quota scaricata. Verifica API Key o disponibilità match.")
+    st.sidebar.warning(f"⚠️ {api_msg}")
 
 if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
     st.cache_data.clear()
