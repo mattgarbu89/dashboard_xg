@@ -487,6 +487,11 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         df_future["Miglior Quota Bookmaker"] = q_book_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
+        # Formattazione con virgola delle colonne numeriche anche nella tabella delle prossime partite
+        for col_num in ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]:
+            if col_num in df_future.columns:
+                df_future[col_num] = df_future[col_num].apply(lambda x: format_num_comma(x))
+
         cols_finali = []
         for c in df_future.columns:
             if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
@@ -507,9 +512,16 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
+        df_played_display = df_played.copy()
+        
+        # Formattazione decimali con la virgola per tutte le colonne numeriche di output
+        for col_num in ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE"]:
+            if col_num in df_played_display.columns:
+                df_played_display[col_num] = df_played_display[col_num].apply(lambda x: format_num_comma(x))
+
         cols_played = [
             c
-            for c in df_played.columns
+            for c in df_played_display.columns
             if any(
                 k in str(c).upper()
                 for k in [
@@ -518,7 +530,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
             )
         ]
         st.dataframe(
-            df_played[cols_played].tail(15).iloc[::-1], use_container_width=True
+            df_played_display[cols_played].tail(15).iloc[::-1], use_container_width=True
         )
 
 
