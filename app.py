@@ -277,28 +277,43 @@ try:
     # STRATEGIE SALVATE
     # ==========================================
     STRATEGIE_SALVATE = {
-        "1. Esito 1-1 (C2 <= 0 | Media Ospite < 1.50)": {
+        "Esito X super combo 235 match 37.45%": {
             "SOMMA": None,
             "DC": None,
-            "C1": None,
+            "C1": -1.5,
+            "C1_OP": ">=",
             "C2": 0.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": 1.0,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
+        },
+        "Esito X 300 match 36.33%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": -1.5,
+            "C1_OP": ">=",
+            "C2": 1.0,
             "C2_OP": "<=",
             "MEDIA CASA": None,
             "MEDIA OSPITE": 1.50,
-            "MEDIA_OSPITE_OP": "<",
-            "MERCATO": "ESITO 1-1",
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
         },
-        "2. Under 2,5 Ospite (C2 <= -4)": {
+        "Esito X 406 match 34.24%": {
             "SOMMA": None,
             "DC": None,
             "C1": None,
-            "C2": -4.0,
-            "C2_OP": "<=",
-            "MEDIA CASA": None,
-            "MEDIA OSPITE": None,
-            "MERCATO": "UNDER 2,5 OSPITE",
+            "C2": None,
+            "MEDIA CASA": 1.1,
+            "MEDIA_CASA_OP": ">=",
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<=",
+            "MERCATO": "X",
         },
-        "3. Esito X - Base (Somma >= -1.03 | Media Ospite <= 1.54)": {
+        "Esito X 263 match 36.5%": {
             "SOMMA": -1.03,
             "SOMMA_OP": ">=",
             "DC": None,
@@ -309,7 +324,7 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "4. Esito X - Gold (Somma >= -0.79 | Media Casa >= 1.1 | Media Ospite <= 1.51)": {
+        "Esito X 200 match 38%": {
             "SOMMA": -0.79,
             "SOMMA_OP": ">=",
             "DC": None,
@@ -321,7 +336,7 @@ try:
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
         },
-        "5. Esito X - Stabilità (C1 >= -1.02 | DC >= 0.62 | Media Ospite <= 1.51)": {
+        "Esito X 301 match 35.9%": {
             "SOMMA": None,
             "DC": 0.62,
             "DC_OP": ">=",
@@ -332,6 +347,27 @@ try:
             "MEDIA OSPITE": 1.51,
             "MEDIA_OSPITE_OP": "<=",
             "MERCATO": "X",
+        },
+        "Esito 1-1 436 match 17.9%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": 0.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": 1.50,
+            "MEDIA_OSPITE_OP": "<",
+            "MERCATO": "ESITO 1-1",
+        },
+        "Esito und 2,5 ospite 248 match 90.3%": {
+            "SOMMA": None,
+            "DC": None,
+            "C1": None,
+            "C2": -4.0,
+            "C2_OP": "<=",
+            "MEDIA CASA": None,
+            "MEDIA OSPITE": None,
+            "MERCATO": "UNDER 2,5 OSPITE",
         },
     }
 
@@ -350,7 +386,7 @@ try:
     # MODALITÀ 0: PANORAMICA SOTTOPERFORMANTE (AUTOMATICA)
     # -------------------------------------------------------------------------
     if "🚨" in modalita:
-      st.subheader("🚨 Report Strategie in Sottoperformance")
+      st.subheader("🚨 Report Strategie in Sottoperperformance")
       st.write(
           "Elenco sintetico delle strategie salvate la cui **Media Mobile"
           " recente è INFERIORE alla Media Storica Totale** o che presentano"
@@ -437,7 +473,6 @@ try:
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
-        # Calcolo Media Mobile e Frequenza Cumulativa Dinamica Progressiva
         df_played["MA"] = (
             df_played["WIN"].rolling(window=finestra_ma).mean() * 100
         )
@@ -552,7 +587,6 @@ try:
         freq_cum = (wins / tot_match) * 100
         quota_reale = (100 / freq_cum) if freq_cum > 0 else 0.0
 
-        # Calcolo Media Mobile e Frequenza Cumulativa Dinamica Progressiva
         df_played["MA"] = (
             df_played["WIN"].rolling(window=finestra_ma).mean() * 100
         )
