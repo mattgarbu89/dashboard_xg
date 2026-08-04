@@ -139,13 +139,12 @@ def fuzzy_match_teams(t1, t2):
     if c1 in c2 or c2 in c1:
         return True
     
-    # Matching basato sul confronto di token (parole principali)
     words1 = set(c1.split())
     words2 = set(c2.split())
     if len(words1.intersection(words2)) > 0:
         return True
         
-    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.55
+    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.45
 
 
 @st.cache_data(ttl=1800)
@@ -153,7 +152,6 @@ def fetch_all_active_odds(api_key):
     if not api_key:
         return []
 
-    # 1. Recupera dinamico di tutte le leghe di calcio attive dall'API
     sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
     try:
         res_sports = requests.get(sports_url, timeout=5)
@@ -169,8 +167,7 @@ def fetch_all_active_odds(api_key):
         ]
 
     all_odds = []
-    # 2. Scarica le quote per ogni lega attiva
-    for key in soccer_keys[:15]:  # Limite per preservare il consumo di API call
+    for key in soccer_keys[:25]:
         url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
@@ -455,8 +452,6 @@ odds_dataset = fetch_all_active_odds(api_key) if api_key else []
 
 if len(odds_dataset) > 0:
     st.sidebar.success(f"⚡ Quote API Connesse ({len(odds_dataset)} match salvati)")
-    with st.sidebar.expander("🔍 Match salvati in memoria"):
-        st.write([f"{m.get('home_team')} vs {m.get('away_team')}" for m in odds_dataset[:20]])
 else:
     st.sidebar.warning("⚠️ Nessuna quota scaricata. Verifica API Key o disponibilità match.")
 
@@ -480,6 +475,36 @@ try:
 
     if df_raw is not None:
         df_base = df_raw.copy()
+
+        # Pulsante di Diagnostica
+        if st.sidebar.button("🔎 Esegui Diagnostica Matching"):
+            col_casa, col_ospite = detect_team_columns(df_base)
+            df_future_diag = df_base[df_base["GOL CASA"].isna()].copy()
+            diag_results = []
+            
+            for _, r in df_future_diag.iterrows():
+                h_team = str(r.get(col_casa, ""))
+                a_team = str(r.get(col_ospite, ""))
+                found_match = "❌ NESSUNA CORRISPONDENZA"
+                matched_with = ""
+                
+                for ev in odds_dataset:
+                    ev_h = ev.get("home_team", "")
+                    ev_a = ev.get("away_team", "")
+                    if fuzzy_match_teams(h_team, ev_h) and fuzzy_match_teams(a_team, ev_a):
+                        found_match = "✅ TROVATA"
+                        matched_with = f"{ev_h} vs {ev_a}"
+                        break
+                
+                diag_results.append({
+                    "Squadra Casa (Foglio)": h_team,
+                    "Squadra Ospite (Foglio)": a_team,
+                    "Esito Match API": found_match,
+                    "Match Corrispondente API": matched_with
+                })
+            
+            st.write("### 🛠️ Risultato Diagnostica Nomi")
+            st.dataframe(pd.DataFrame(diag_results), use_container_width=True)
 
         STRATEGIE_SALVATE = {
             "Esito X super combo 235 match 37.45%": {
