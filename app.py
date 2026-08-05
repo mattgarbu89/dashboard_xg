@@ -547,6 +547,26 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
+        # Calcoliamo la quota bookmaker anche per le partite processate
+        q_book_played_list = []
+        for _, row in df_played.iterrows():
+            # Controlla prima se è già presente una colonna quota nell'excel
+            excel_quota = None
+            for col_q in df_played.columns:
+                if "QUOTA" in str(col_q).upper():
+                    excel_quota = row.get(col_q)
+                    break
+
+            if pd.notna(excel_quota) and str(excel_quota).strip() not in ["", "nan", "None"]:
+                q_book_played_list.append(format_num_comma(excel_quota))
+            else:
+                val_casa = row.get(col_casa) if col_casa else None
+                val_ospite = row.get(col_ospite) if col_ospite else None
+                q_book = match_odds(val_casa, val_ospite, market_target, odds_dataset)
+                q_book_played_list.append(format_num_comma(q_book) if q_book else "N/D")
+
+        df_played["Quota Bookmaker"] = q_book_played_list
+
         cols_played = []
 
         for c in df_played.columns:
@@ -568,7 +588,11 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         ]
         cols_played.extend(altre_cols)
 
-        df_display = df_played[cols_played].tail(15).iloc[::-1].copy()
+        if "Quota Bookmaker" in df_played.columns and "Quota Bookmaker" not in cols_played:
+            cols_played.append("Quota Bookmaker")
+
+        # Rimosso il limite .tail(15) per mostrare TUTTE le partite storiche
+        df_display = df_played[cols_played].iloc[::-1].copy()
         for col in df_display.select_dtypes(include=['float', 'float64']).columns:
             df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
 
