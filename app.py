@@ -148,7 +148,6 @@ def clean_team_name(name):
         r"\bac\b": "",
         r"\bfc\b": "",
         r"\bsc\b": "",
-        r"\bcf\b": "",
         r"\bcd\b": "",
     }
     for pat, repl in replacements.items():
@@ -206,7 +205,7 @@ def fetch_all_active_odds(api_key):
 
     all_odds = []
     for key in soccer_keys:
-        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
+        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu,uk&markets=h2h,totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
             if res.status_code == 200:
@@ -222,7 +221,7 @@ def fetch_all_active_odds(api_key):
 
 
 def extract_bet365_odd(event, market_target):
-    """Estrae la quota da Bet365 o da qualsiasi bookmaker disponibile nell'evento se Bet365 manca."""
+    """Estrae la quota SOLO ED ESCLUSIVAMENTE da Bet365."""
     m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
@@ -231,7 +230,7 @@ def extract_bet365_odd(event, market_target):
     if not bookmakers:
         return None
 
-    # Cerca prima Bet365, altrimenti usa il primo bookmaker disponibile
+    # RICERCA RIGIDA ED ESCLUSIVA DI BET365 (NESSUN FALLBACK SU ALTRI BOOKMAKER)
     target_bkm = None
     for bkm in bookmakers:
         bkm_key = bkm.get("key", "").lower()
@@ -240,8 +239,9 @@ def extract_bet365_odd(event, market_target):
             target_bkm = bkm
             break
 
+    # Se Bet365 non c'è, restituisce None e ignora altri bookmaker
     if not target_bkm:
-        target_bkm = bookmakers[0]
+        return None
 
     odds_1, odds_x, odds_2 = None, None, None
     over_25, under_25 = None, None
@@ -301,7 +301,7 @@ def extract_bet365_odd(event, market_target):
 
 
 def match_odds_bet365(home_team, away_team, market_target, odds_data):
-    """Restituisce la quota e il nome del match trovato."""
+    """Restituisce la quota Bet365 e il nome del match trovato."""
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None, "N/D"
 
@@ -313,8 +313,11 @@ def match_odds_bet365(home_team, away_team, market_target, odds_data):
 
         if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
             quota = extract_bet365_odd(event, market_target)
-            match_found = f"{ev_home} vs {ev_away}"
-            return quota, match_found
+            if quota is not None:
+                match_found = f"{ev_home} vs {ev_away} (Bet365)"
+                return quota, match_found
+            else:
+                return None, f"{ev_home} vs {ev_away} (Bet365 Non Disponibile)"
 
     return None, "Non Trovata"
 
