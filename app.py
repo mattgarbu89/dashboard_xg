@@ -177,7 +177,6 @@ def fuzzy_match_teams(t1, t2):
 
 
 def fetch_all_active_odds(api_key):
-    """Scarica le quote solo ed esclusivamente quando viene chiamata esplicitamente."""
     if not api_key:
         return [], "Nessuna API Key fornita"
 
@@ -220,90 +219,92 @@ def fetch_all_active_odds(api_key):
     return all_odds, req_remaining
 
 
-def extract_bet365_odd(event, market_target):
-    """Estrae la quota SOLO ED ESCLUSIVAMENTE da Bet365."""
+def extract_best_odd(event, market_target):
+    """Scansiona TUTTI i bookmaker dell'evento e restituisce la quota più alta e il nome del bookmaker."""
     m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
 
     bookmakers = event.get("bookmakers", [])
     if not bookmakers:
-        return None
+        return None, None
 
-    # RICERCA RIGIDA ED ESCLUSIVA DI BET365 (NESSUN FALLBACK SU ALTRI BOOKMAKER)
-    target_bkm = None
+    best_price = None
+    best_bookmaker = None
+
     for bkm in bookmakers:
-        bkm_key = bkm.get("key", "").lower()
-        bkm_title = bkm.get("title", "").lower()
-        if "bet365" in bkm_key or "bet365" in bkm_title:
-            target_bkm = bkm
-            break
+        bkm_title = bkm.get("title", bkm.get("key", "Sconosciuto"))
+        
+        odds_1, odds_x, odds_2 = None, None, None
+        over_25, under_25 = None, None
 
-    # Se Bet365 non c'è, restituisce None e ignora altri bookmaker
-    if not target_bkm:
-        return None
+        for market in bkm.get("markets", []):
+            key = market.get("key")
+            outcomes = market.get("outcomes", [])
 
-    odds_1, odds_x, odds_2 = None, None, None
-    over_25, under_25 = None, None
+            if key == "h2h":
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    name = out.get("name", "")
+                    if name == ev_home or fuzzy_match_teams(name, ev_home):
+                        odds_1 = price
+                    elif name == ev_away or fuzzy_match_teams(name, ev_away):
+                        odds_2 = price
+                    elif name in ["Draw", "X"]:
+                        odds_x = price
 
-    for market in target_bkm.get("markets", []):
-        key = market.get("key")
-        outcomes = market.get("outcomes", [])
+            elif key == "totals":
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    point = float(out.get("point", 0))
+                    name = out.get("name", "")
+                    if point == 2.5:
+                        if name == "Over":
+                            over_25 = price
+                        elif name == "Under":
+                            under_25 = price
 
-        if key == "h2h":
-            for out in outcomes:
-                price = float(out.get("price", 0))
-                name = out.get("name", "")
-                if name == ev_home or fuzzy_match_teams(name, ev_home):
-                    odds_1 = price
-                elif name == ev_away or fuzzy_match_teams(name, ev_away):
-                    odds_2 = price
-                elif name in ["Draw", "X"]:
-                    odds_x = price
+        current_odd = None
+        if m_target == "1":
+            current_odd = odds_1
+        elif m_target == "X":
+            current_odd = odds_x
+        elif m_target == "2":
+            current_odd = odds_2
+        elif m_target in ["1X", "1/X"]:
+            if odds_1 and odds_x:
+                current_odd = round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
+            else:
+                current_odd = odds_1
+        elif m_target in ["X2", "X/2"]:
+            if odds_2 and odds_x:
+                current_odd = round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
+            else:
+                current_odd = odds_2
+        elif m_target in ["12", "1/2"]:
+            if odds_1 and odds_2:
+                current_odd = round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
+            else:
+                current_odd = odds_1
+        elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
+            current_odd = over_25
+        elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
+            current_odd = under_25
+        elif m_target == "ESITO 1-1":
+            current_odd = odds_x
 
-        elif key == "totals":
-            for out in outcomes:
-                price = float(out.get("price", 0))
-                point = float(out.get("point", 0))
-                name = out.get("name", "")
-                if point == 2.5:
-                    if name == "Over":
-                        over_25 = price
-                    elif name == "Under":
-                        under_25 = price
+        if current_odd is not None and current_odd > 0:
+            if best_price is None or current_odd > best_price:
+                best_price = current_odd
+                best_bookmaker = bkm_title
 
-    if m_target == "1":
-        return odds_1
-    elif m_target == "X":
-        return odds_x
-    elif m_target == "2":
-        return odds_2
-    elif m_target in ["1X", "1/X"]:
-        if odds_1 and odds_x:
-            return round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
-        return odds_1
-    elif m_target in ["X2", "X/2"]:
-        if odds_2 and odds_x:
-            return round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
-        return odds_2
-    elif m_target in ["12", "1/2"]:
-        if odds_1 and odds_2:
-            return round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
-        return odds_1
-    elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
-        return over_25
-    elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
-        return under_25
-    elif m_target == "ESITO 1-1":
-        return odds_x
-
-    return odds_1 or odds_x or odds_2
+    return best_price, best_bookmaker
 
 
-def match_odds_bet365(home_team, away_team, market_target, odds_data):
-    """Restituisce la quota Bet365 e il nome del match trovato."""
+def match_odds(home_team, away_team, market_target, odds_data):
+    """Trova il match e restituisce la miglior quota disponibile con il relativo bookmaker."""
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
-        return None, "N/D"
+        return None, "N/D", "N/D"
 
     h_clean, a_clean = split_teams_if_combined(home_team, away_team)
 
@@ -312,14 +313,14 @@ def match_odds_bet365(home_team, away_team, market_target, odds_data):
         ev_away = event.get("away_team", "")
 
         if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
-            quota = extract_bet365_odd(event, market_target)
-            if quota is not None:
-                match_found = f"{ev_home} vs {ev_away} (Bet365)"
-                return quota, match_found
+            quota_max, bookmaker = extract_best_odd(event, market_target)
+            if quota_max is not None:
+                match_found = f"{ev_home} vs {ev_away}"
+                return quota_max, bookmaker, match_found
             else:
-                return None, f"{ev_home} vs {ev_away} (Bet365 Non Disponibile)"
+                return None, "N/D", f"{ev_home} vs {ev_away} (Quota non disponibile)"
 
-    return None, "Non Trovata"
+    return None, "N/D", "Non Trovata"
 
 
 def evaluate_market(row, market):
@@ -534,14 +535,15 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
-        q_book_list, semaforo_list, match_api_list = [], [], []
+        q_book_list, bkm_list, semaforo_list, match_api_list = [], [], [], []
 
         for _, row in df_future.iterrows():
             val_casa = row.get(col_casa) if col_casa else None
             val_ospite = row.get(col_ospite) if col_ospite else None
 
-            q_book, match_name_api = match_odds_bet365(val_casa, val_ospite, market_target, odds_dataset)
+            q_book, bookmaker, match_name_api = match_odds(val_casa, val_ospite, market_target, odds_dataset)
             match_api_list.append(match_name_api)
+            bkm_list.append(bookmaker)
 
             if q_book:
                 q_book_list.append(format_num_comma(q_book))
@@ -557,7 +559,8 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
         df_future["Match Trovato su API"] = match_api_list
         df_future["Quota Limite"] = format_num_comma(quota_limite)
-        df_future["Quota Bet365"] = q_book_list
+        df_future["Miglior Quota"] = q_book_list
+        df_future["Bookmaker"] = bkm_list
         df_future["Valutazione Value Bet"] = semaforo_list
 
         cols_finali = []
@@ -571,7 +574,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali and col_ospite != col_casa:
             cols_finali.append(col_ospite)
 
-        cols_finali.extend(["Match Trovato su API", "Quota Limite", "Quota Bet365", "Valutazione Value Bet"])
+        cols_finali.extend(["Match Trovato su API", "Quota Limite", "Miglior Quota", "Bookmaker", "Valutazione Value Bet"])
         cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
 
         df_future_display = df_future[cols_finali_clean].copy()
@@ -584,6 +587,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
         q_book_played_list = []
+        bkm_played_list = []
         for _, row in df_played.iterrows():
             excel_quota = None
             for col_q in df_played.columns:
@@ -593,13 +597,16 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
             if pd.notna(excel_quota) and str(excel_quota).strip() not in ["", "nan", "None"]:
                 q_book_played_list.append(format_num_comma(excel_quota))
+                bkm_played_list.append("Excel")
             else:
                 val_casa = row.get(col_casa) if col_casa else None
                 val_ospite = row.get(col_ospite) if col_ospite else None
-                q_book, _ = match_odds_bet365(val_casa, val_ospite, market_target, odds_dataset)
+                q_book, bkm, _ = match_odds(val_casa, val_ospite, market_target, odds_dataset)
                 q_book_played_list.append(format_num_comma(q_book) if q_book else "N/D")
+                bkm_played_list.append(bkm if bkm else "N/D")
 
-        df_played["Quota Bet365"] = q_book_played_list
+        df_played["Miglior Quota"] = q_book_played_list
+        df_played["Bookmaker"] = bkm_played_list
 
         cols_played = []
 
@@ -622,8 +629,10 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         ]
         cols_played.extend(altre_cols)
 
-        if "Quota Bet365" in df_played.columns and "Quota Bet365" not in cols_played:
-            cols_played.append("Quota Bet365")
+        if "Miglior Quota" in df_played.columns and "Miglior Quota" not in cols_played:
+            cols_played.append("Miglior Quota")
+        if "Bookmaker" in df_played.columns and "Bookmaker" not in cols_played:
+            cols_played.append("Bookmaker")
 
         df_display = df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
         df_display.index = range(1, len(df_display) + 1)
