@@ -541,16 +541,18 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         cols_finali.extend(["Quota Limite", "Miglior Quota Bookmaker", "Valutazione Value Bet"])
         cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
 
-        st.dataframe(df_future[cols_finali_clean], use_container_width=True)
+        df_future_display = df_future[cols_finali_clean].copy()
+        # Indice da 1 a N per le prossime partite
+        df_future_display.index = range(1, len(df_future_display) + 1)
+
+        st.dataframe(df_future_display, use_container_width=True)
     else:
         st.info("Nessuna prossima partita trovata per questa selezione.")
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        # Calcoliamo la quota bookmaker anche per le partite processate
         q_book_played_list = []
         for _, row in df_played.iterrows():
-            # Controlla prima se è già presente una colonna quota nell'excel
             excel_quota = None
             for col_q in df_played.columns:
                 if "QUOTA" in str(col_q).upper():
@@ -591,8 +593,10 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         if "Quota Bookmaker" in df_played.columns and "Quota Bookmaker" not in cols_played:
             cols_played.append("Quota Bookmaker")
 
-        # Rimosso il limite .tail(15) per mostrare TUTTE le partite storiche
-        df_display = df_played[cols_played].iloc[::-1].copy()
+        df_display = df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
+        # Indice da 1 a N per le partite processate
+        df_display.index = range(1, len(df_display) + 1)
+
         for col in df_display.select_dtypes(include=['float', 'float64']).columns:
             df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
 
@@ -679,7 +683,7 @@ try:
             mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
             st.sidebar.markdown("---")
 
-        # --- GESTIONE API CON SALVATAGGIO IN MEMORIA (NESSUNA CHIAMATA AUTOMATICA) ---
+        # --- GESTIONE API CON SALVATAGGIO IN MEMORIA ---
         if "odds_dataset" not in st.session_state:
             st.session_state["odds_dataset"] = []
         if "api_req_remaining" not in st.session_state:
@@ -692,7 +696,6 @@ try:
             type="password",
         )
 
-        # PULSANTE DEDICATO: L'API SI COLLEGA SOLO ED ESCLUSIVAMENTE SE PREMI QUESTO TASTO
         if st.sidebar.button("📥 Scarica / Aggiorna Quote ora"):
             if api_key:
                 with st.sidebar.spinner("Download quote in corso..."):
