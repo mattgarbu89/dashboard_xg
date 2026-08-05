@@ -169,12 +169,12 @@ def fuzzy_match_teams(t1, t2):
     if c1 == c2:
         return True
 
-    if len(c1) >= 4 and len(c2) >= 4:
+    if len(c1) >= 3 and len(c2) >= 3:
         if c1 in c2 or c2 in c1:
             return True
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.55
+    return ratio >= 0.50
 
 
 def fetch_all_active_odds(api_key):
@@ -197,7 +197,7 @@ def fetch_all_active_odds(api_key):
 
         all_sports = res_sports.json()
         soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
-    except Exception as e:
+    except Exception:
         soccer_keys = [
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
@@ -222,26 +222,31 @@ def fetch_all_active_odds(api_key):
 
 
 def extract_bet365_odd(event, market_target):
-    """Estrae la quota ESCLUSIVAMENTE da Bet365 gestendo piu varianti del bookmaker e mercati derivati."""
+    """Estrae la quota da Bet365 o da qualsiasi bookmaker disponibile nell'evento se Bet365 manca."""
     m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
 
-    odds_1, odds_x, odds_2 = None, None, None
-    over_25, under_25 = None, None
+    bookmakers = event.get("bookmakers", [])
+    if not bookmakers:
+        return None
 
-    bet365_bkm = None
-    for bkm in event.get("bookmakers", []):
+    # Cerca prima Bet365, altrimenti usa il primo bookmaker disponibile
+    target_bkm = None
+    for bkm in bookmakers:
         bkm_key = bkm.get("key", "").lower()
         bkm_title = bkm.get("title", "").lower()
         if "bet365" in bkm_key or "bet365" in bkm_title:
-            bet365_bkm = bkm
+            target_bkm = bkm
             break
 
-    if not bet365_bkm:
-        return None
+    if not target_bkm:
+        target_bkm = bookmakers[0]
 
-    for market in bet365_bkm.get("markets", []):
+    odds_1, odds_x, odds_2 = None, None, None
+    over_25, under_25 = None, None
+
+    for market in target_bkm.get("markets", []):
         key = market.get("key")
         outcomes = market.get("outcomes", [])
 
@@ -296,7 +301,7 @@ def extract_bet365_odd(event, market_target):
 
 
 def match_odds_bet365(home_team, away_team, market_target, odds_data):
-    """Restituisce la quota Bet365 e il nome esatto del match trovato per la verifica visiva."""
+    """Restituisce la quota e il nome del match trovato."""
     if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
         return None, "N/D"
 
