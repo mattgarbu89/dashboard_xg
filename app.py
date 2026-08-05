@@ -203,8 +203,9 @@ def fetch_all_active_odds(api_key):
         ]
 
     all_odds = []
+    # Includiamo i mercati estesi (h2h, totals, correct_score, team_totals)
     for key in soccer_keys:
-        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu,uk&markets=h2h,totals&oddsFormat=decimal"
+        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu,uk&markets=h2h,totals,correct_score,team_totals&oddsFormat=decimal"
         try:
             res = requests.get(url, timeout=5)
             if res.status_code == 200:
@@ -220,7 +221,7 @@ def fetch_all_active_odds(api_key):
 
 
 def extract_best_odd(event, market_target):
-    """Scansiona TUTTI i bookmaker dell'evento e restituisce la quota più alta e il nome del bookmaker."""
+    """Scansiona i bookmaker e restituisce la quota più alta e il relativo bookmaker per il mercato specifico."""
     m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
@@ -234,14 +235,19 @@ def extract_best_odd(event, market_target):
 
     for bkm in bookmakers:
         bkm_title = bkm.get("title", bkm.get("key", "Sconosciuto"))
-        
+
         odds_1, odds_x, odds_2 = None, None, None
         over_25, under_25 = None, None
+        exact_11 = None
+        
+        home_under_25, home_under_15 = None, None
+        away_under_25, away_under_15 = None, None
 
         for market in bkm.get("markets", []):
             key = market.get("key")
             outcomes = market.get("outcomes", [])
 
+            # Mercato 1X2
             if key == "h2h":
                 for out in outcomes:
                     price = float(out.get("price", 0))
@@ -253,6 +259,7 @@ def extract_best_odd(event, market_target):
                     elif name in ["Draw", "X"]:
                         odds_x = price
 
+            # Mercato Somma Gol Totale
             elif key == "totals":
                 for out in outcomes:
                     price = float(out.get("price", 0))
@@ -263,6 +270,37 @@ def extract_best_odd(event, market_target):
                             over_25 = price
                         elif name == "Under":
                             under_25 = price
+
+            # Mercato Risultato Esatto (Correct Score)
+            elif key == "correct_score":
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    name = str(out.get("name", "")).strip()
+                    if name in ["1-1", "1:1", "1 - 1"]:
+                        exact_11 = price
+
+            # Mercato Gol Squadra (Team Totals)
+            elif key in ["team_totals", "home_team_totals", "away_team_totals"]:
+                for out in outcomes:
+                    price = float(out.get("price", 0))
+                    point = float(out.get("point", 0))
+                    name = out.get("name", "")
+                    description = out.get("description", "")
+                    
+                    # Identifica se si riferisce a Casa o Ospite
+                    is_away = ev_away in description or fuzzy_match_teams(description, ev_away)
+                    is_home = ev_home in description or fuzzy_match_teams(description, ev_home)
+
+                    if is_away:
+                        if point == 2.5 and name == "Under":
+                            away_under_25 = price
+                        elif point == 1.5 and name == "Under":
+                            away_under_15 = price
+                    elif is_home:
+                        if point == 2.5 and name == "Under":
+                            home_under_25 = price
+                        elif point == 1.5 and name == "Under":
+                            home_under_15 = price
 
         current_odd = None
         if m_target == "1":
@@ -286,12 +324,20 @@ def extract_best_odd(event, market_target):
                 current_odd = round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
             else:
                 current_odd = odds_1
-        elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
+        elif "OVER 2.5" in m_target:
             current_odd = over_25
-        elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
+        elif "UNDER 2.5 OSPITE" in m_target:
+            current_odd = away_under_25
+        elif "UNDER 1.5 OSPITE" in m_target:
+            current_odd = away_under_15
+        elif "UNDER 2.5 CASA" in m_target:
+            current_odd = home_under_25
+        elif "UNDER 1.5 CASA" in m_target:
+            current_odd = home_under_15
+        elif "UNDER 2.5" in m_target:
             current_odd = under_25
         elif m_target == "ESITO 1-1":
-            current_odd = odds_x
+            current_odd = exact_11
 
         if current_odd is not None and current_odd > 0:
             if best_price is None or current_odd > best_price:
