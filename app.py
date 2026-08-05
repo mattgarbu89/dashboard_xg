@@ -663,9 +663,83 @@ try:
                 "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
+                "🔥 Cicli Max da Puntare",
             ],
         )
+elif "🔥" in modalita:
+    st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
+    st.caption("Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico")
 
+    cicli_target = []
+
+    # 1. Scansione Strategie Salvate
+    for item in ranked_strategies:
+        name = item["nome"]
+        params = item["params"]
+        df_strat = apply_filters(df_base, params)
+        df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+
+        if len(df_played) > 0:
+            delays = calculate_delays_and_cycles(df_played["WIN"])
+            c_att = delays["ciclo_attuale"]
+            c_max = delays["ciclo_max_storico"]
+
+            if c_att >= c_max and c_max > 0:
+                tot = len(df_played)
+                wr = (df_played["WIN"].sum() / tot * 100)
+                q_fair = (100 / wr) if wr > 0 else 0.0
+
+                cicli_target.append({
+                    "Tipo": "Strategia Salvata",
+                    "Nome / Mercato": name,
+                    "Mercato Specifico": params["MERCATO"],
+                    "Ciclo Attuale": c_att,
+                    "Ciclo Max Storico": c_max,
+                    "Ritardo Medio": format_num_comma(delays["ritardo_medio"], 2),
+                    "Win Rate Reale": f"{format_num_comma(wr)}%",
+                    "Quota Fair": format_num_comma(q_fair),
+                    "Match Giocati": tot,
+                    "Filtri / Dettagli": get_combination_string(params),
+                })
+
+    # 2. Scansione Mercati Totali Generici
+    for m in MERCATI_TOTALI:
+        params_m = {
+            "SOMMA": None, "DC": None, "C1": None, "C2": None,
+            "MEDIA CASA": None, "MEDIA OSPITE": None,
+            "MERCATO": m
+        }
+        df_m = apply_filters(df_base, params_m)
+        df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+
+        if len(df_played_m) > 0:
+            delays_m = calculate_delays_and_cycles(df_played_m["WIN"])
+            c_att_m = delays_m["ciclo_attuale"]
+            c_max_m = delays_m["ciclo_max_storico"]
+
+            if c_att_m >= c_max_m and c_max_m > 0:
+                tot_m = len(df_played_m)
+                wr_m = (df_played_m["WIN"].sum() / tot_m * 100)
+                q_fair_m = (100 / wr_m) if wr_m > 0 else 0.0
+
+                cicli_target.append({
+                    "Tipo": "Mercato Totale",
+                    "Nome / Mercato": f"Database Totale - {m}",
+                    "Mercato Specifico": m,
+                    "Ciclo Attuale": c_att_m,
+                    "Ciclo Max Storico": c_max_m,
+                    "Ritardo Medio": format_num_comma(delays_m["ritardo_medio"], 2),
+                    "Win Rate Reale": f"{format_num_comma(wr_m)}%",
+                    "Quota Fair": format_num_comma(q_fair_m),
+                    "Match Giocati": tot_m,
+                    "Filtri / Dettagli": "Database Totale (Senza filtri extra)",
+                })
+
+    if cicli_target:
+        df_cicli_res = pd.DataFrame(cicli_target)
+        st.dataframe(df_cicli_res, use_container_width=True)
+    else:
+        st.info("Al momento nessuna strategia o mercato ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico.")
         st.sidebar.markdown("---")
         if "📊" in modalita:
             st.sidebar.header("🎯 SELEZIONA STRATEGIA")
