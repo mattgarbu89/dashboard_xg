@@ -737,8 +737,98 @@ try:
             else:
                 st.info("Tutte le strategie stabili sopra la media target.")
 
+        elif "📊" in modalita:
+            # === MODALITÀ STRATEGIE XG & VALUE BET FINDER ===
+            strat_info = strat_map[strat_nome]
+            params = strat_info["params"]
+            win_rate_storico = strat_info["win_rate_storico"]
+
+            df_strat = apply_filters(df_base, params)
+            df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+            tot_match = len(df_played)
+
+            win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
+            quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
+
+            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
+
+            st.sidebar.markdown("---")
+            finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
+
+            mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
+            if tot_match >= finestra_ma:
+                df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma).mean() * 100
+                df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
+                
+                ma_valid = df_played["MA"].dropna()
+                if len(ma_valid) > 0:
+                    mm_att = ma_valid.iloc[-1]
+                    mm_min = ma_valid.min()
+                    mm_max = ma_valid.max()
+
+            st.subheader(f"📊 Analisi Strategia: `{strat_nome}`")
+
+            with st.container(border=True):
+                st.markdown(get_combination_string(params))
+
+            st.markdown("#### 📈 Metriche Principali")
+
+            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
+            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            with r1_c1:
+                with st.container(border=True):
+                    st.caption("Match Totali Giocati")
+                    st.markdown(f"### {tot_match}")
+
+            with r1_c2:
+                with st.container(border=True):
+                    st.caption("Win Rate Reale (%)")
+                    st.markdown(f"### {format_num_comma(win_rate_reale)}%")
+
+            with r1_c3:
+                with st.container(border=True):
+                    st.caption("Quota Fair / Limite")
+                    st.markdown(f"### {format_num_comma(quota_limite)}")
+
+            with r1_c4:
+                with st.container(border=True):
+                    st.caption("Ritardo Attuale (Match)")
+                    st.markdown(f"### {current_delay}")
+
+            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+            with r2_c1:
+                with st.container(border=True):
+                    st.caption("Ritardo Max Storico (Match)")
+                    st.markdown(f"### {max_delay}")
+
+            with r2_c2:
+                with st.container(border=True):
+                    st.caption(f"MM Attuale ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
+
+            with r2_c3:
+                with st.container(border=True):
+                    st.caption(f"MM Minima ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c4:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma} match)")
+                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
+
+            st.markdown("---")
+
+            if tot_match >= finestra_ma:
+                chart_data = pd.DataFrame({
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                })
+                st.line_chart(chart_data)
+
+            render_tables(df_strat, quota_limite, odds_dataset, params["MERCATO"], col_casa, col_ospite)
+
         elif "📂" in modalita:
-            # === NUOVA MODALITÀ DATABASE TOTALE ===
+            # === MODALITÀ DATABASE TOTALE ===
             st.subheader(f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`")
 
             params_tot = {
@@ -829,97 +919,5 @@ try:
 
             render_tables(df_tot, quota_limite, odds_dataset, mercato_totale_sel, col_casa, col_ospite)
 
-        else:
-            # === MODALITÀ STRATEGIE SALVATE ===
-            selected_item = strat_map[strat_nome]
-            params = selected_item["params"]
-            win_rate_storico = selected_item["win_rate_storico"]
-
-            df_strat = apply_filters(df_base, params)
-            df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
-            tot_match = len(df_played)
-
-            win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
-            quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
-
-            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
-
-            st.sidebar.markdown("---")
-            finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
-
-            mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
-            if tot_match >= finestra_ma:
-                df_played["MA"] = df_played["WIN"].rolling(window=finestra_ma).mean() * 100
-                df_played["FREQ_CUM_DINAMICA"] = df_played["WIN"].expanding().mean() * 100
-                
-                ma_valid = df_played["MA"].dropna()
-                if len(ma_valid) > 0:
-                    mm_att = ma_valid.iloc[-1]
-                    mm_min = ma_valid.min()
-                    mm_max = ma_valid.max()
-
-            st.subheader(f"📊 {strat_nome}")
-
-            # ESPLICITAZIONE DELLA COMBINAZIONE DEI PARAMETRI
-            with st.container(border=True):
-                st.markdown(get_combination_string(params))
-
-            st.markdown("#### 📈 Metriche Principali")
-
-            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
-            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-            with r1_c1:
-                with st.container(border=True):
-                    st.caption("Match Totali Giocati")
-                    st.markdown(f"### {tot_match}")
-
-            with r1_c2:
-                with st.container(border=True):
-                    st.caption("Win Rate Reale (%)")
-                    st.markdown(f"### {format_num_comma(win_rate_reale)}%")
-
-            with r1_c3:
-                with st.container(border=True):
-                    st.caption("Quota Fair / Limite")
-                    st.markdown(f"### {format_num_comma(quota_limite)}")
-
-            with r1_c4:
-                with st.container(border=True):
-                    st.caption("Ritardo Attuale (Match)")
-                    st.markdown(f"### {current_delay}")
-
-            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
-            with r2_c1:
-                with st.container(border=True):
-                    st.caption("Ritardo Max Storico (Match)")
-                    st.markdown(f"### {max_delay}")
-
-            with r2_c2:
-                with st.container(border=True):
-                    st.caption(f"MM Attuale ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
-
-            with r2_c3:
-                with st.container(border=True):
-                    st.caption(f"MM Minima ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
-
-            with r2_c4:
-                with st.container(border=True):
-                    st.caption(f"MM Massima ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
-
-            st.markdown("---")
-
-            if tot_match >= finestra_ma:
-                chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
-                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
-                    "Media Target": win_rate_storico,
-                })
-                st.line_chart(chart_data)
-
-            render_tables(df_strat, quota_limite, odds_dataset, params["MERCATO"], col_casa, col_ospite)
-
 except Exception as e:
-    st.error(f"Errore durante l'elaborazione dei dati: {e}")
+    st.error(f"❌ Errore durante l'esecuzione dell'applicazione: {e}")
