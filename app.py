@@ -392,48 +392,60 @@ def apply_filters(df, params):
     return df_filtered
 
 
-def calculate_delays(win_series):
-    """Calcola il ritardo attuale e il ritardo massimo storico."""
-    current_delay = 0
-    max_delay = 0
-    temp_delay = 0
+def calculate_delay_cycles(win_series):
+    """
+    Calcola in modo preciso:
+    1. Ritardo attuale (match consecutivi senza win in corso).
+    2. Ritardo max storico.
+    3. Ritardo medio (media della lunghezza dei cicli di ritardo finiti).
+    4. Cicli Consecutivi > Media (quante volte di fila un ciclo ha superato il ritardo medio).
+    5. Ciclo Max Storico (il valore di ritardo più alto registrato).
+    """
+    if len(win_series) == 0:
+        return 0, 0, 0.0, 0, 0
 
+    delays = []
+    current_count = 0
+
+    # Ricostruzione completa di tutti i cicli di ritardo completati
     for win in win_series:
         if win == 0:
-            temp_delay += 1
-            max_delay = max(max_delay, temp_delay)
+            current_count += 1
         elif win == 1:
-            temp_delay = 0
+            if current_count > 0:
+                delays.append(current_count)
+                current_count = 0
 
+    # Ritardo Attuale
+    current_delay = 0
     for win in reversed(win_series.tolist()):
         if win == 0:
             current_delay += 1
         else:
             break
 
-    return current_delay, max_delay
+    # Se l'ultimo ciclo è in corso, lo aggiungiamo per il calcolo della media/max
+    all_delays_for_max = list(delays)
+    if current_delay > 0:
+        all_delays_for_max.append(current_delay)
 
+    max_delay = max(all_delays_for_max) if all_delays_for_max else 0
+    avg_delay = (sum(delays) / len(delays)) if delays else 0.0
 
-def calculate_delay_cycles(win_series):
-    """NUOVA FUNZIONE: Calcola la media dei cicli di ritardo e il numero totale di cicli."""
-    cycles = []
-    current_count = 0
-    
-    for win in win_series:
-        if win == 0:
-            current_count += 1
-        elif win == 1:
-            if current_count > 0:
-                cycles.append(current_count)
-                current_count = 0
+    # Conteggio di quante volte CONSECUTIVE i cicli superano il ritardo medio
+    max_consecutive_over_avg = 0
+    current_consecutive_over_avg = 0
+    max_cycle_value_over_avg = 0
 
-    # Consideriamo anche il ciclo in corso se c'è un ritardo attivo
-    if current_count > 0:
-        cycles.append(current_count)
+    for d in delays:
+        if d > avg_delay:
+            current_consecutive_over_avg += 1
+            max_consecutive_over_avg = max(max_consecutive_over_avg, current_consecutive_over_avg)
+            max_cycle_value_over_avg = max(max_cycle_value_over_avg, d)
+        else:
+            current_consecutive_over_avg = 0
 
-    avg_cycle = (sum(cycles) / len(cycles)) if cycles else 0.0
-    total_cycles = len(cycles)
-    return avg_cycle, total_cycles
+    return current_delay, max_delay, avg_delay, max_consecutive_over_avg, max_cycle_value_over_avg
 
 
 def get_sorted_strategies(df_base, strategie_dict):
@@ -763,8 +775,7 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
-            avg_cycle_delay, total_cycles = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0.0, 0)
+            current_delay, max_delay, avg_delay, max_consec_over_avg, max_cycle_val_over_avg = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0, 0, 0.0, 0, 0)
 
             st.sidebar.markdown("---")
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -785,9 +796,9 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metriche Principali & Analisi Cicli di Ritardo")
 
-            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI
+            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI E CONSECUTIVI
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
@@ -806,7 +817,7 @@ try:
 
             with r1_c4:
                 with st.container(border=True):
-                    st.caption("Ritardo Attuale")
+                    st.caption("Ciclo Attuale (Ritardo In Corso)")
                     st.markdown(f"### {current_delay}")
 
             with r1_c5:
@@ -817,28 +828,28 @@ try:
             r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
             with r2_c1:
                 with st.container(border=True):
-                    st.caption("Ritardo Medio (Cicli)")
-                    st.markdown(f"### {format_num_comma(avg_cycle_delay, 1)}")
+                    st.caption("Ritardo Medio (Match)")
+                    st.markdown(f"### {format_num_comma(avg_delay, 1)}")
 
             with r2_c2:
                 with st.container(border=True):
-                    st.caption("Totale Cicli Ritardo")
-                    st.markdown(f"### {total_cycles}")
+                    st.caption("Cicli Consecutivi > Media")
+                    st.markdown(f"### {max_consec_over_avg}")
 
             with r2_c3:
+                with st.container(border=True):
+                    st.caption("Ciclo Max Superato (Valore)")
+                    st.markdown(f"### {max_cycle_val_over_avg}")
+
+            with r2_c4:
                 with st.container(border=True):
                     st.caption(f"MM Attuale ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
-            with r2_c4:
+            with r2_c5:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
-
-            with r2_c5:
-                with st.container(border=True):
-                    st.caption(f"MM Massima ({finestra_ma}p)")
-                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
 
@@ -868,8 +879,7 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
-            avg_cycle_delay, total_cycles = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0.0, 0)
+            current_delay, max_delay, avg_delay, max_consec_over_avg, max_cycle_val_over_avg = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0, 0, 0.0, 0, 0)
 
             st.sidebar.markdown("---")
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -888,9 +898,9 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params_tot))
 
-            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo (Database Completo)")
+            st.markdown("#### 📈 Metriche Principali & Analisi Cicli di Ritardo (Database Completo)")
 
-            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI
+            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI E CONSECUTIVI
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
@@ -909,7 +919,7 @@ try:
 
             with r1_c4:
                 with st.container(border=True):
-                    st.caption("Ritardo Attuale")
+                    st.caption("Ciclo Attuale (Ritardo In Corso)")
                     st.markdown(f"### {current_delay}")
 
             with r1_c5:
@@ -920,28 +930,28 @@ try:
             r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
             with r2_c1:
                 with st.container(border=True):
-                    st.caption("Ritardo Medio (Cicli)")
-                    st.markdown(f"### {format_num_comma(avg_cycle_delay, 1)}")
+                    st.caption("Ritardo Medio (Match)")
+                    st.markdown(f"### {format_num_comma(avg_delay, 1)}")
 
             with r2_c2:
                 with st.container(border=True):
-                    st.caption("Totale Cicli Ritardo")
-                    st.markdown(f"### {total_cycles}")
+                    st.caption("Cicli Consecutivi > Media")
+                    st.markdown(f"### {max_consec_over_avg}")
 
             with r2_c3:
+                with st.container(border=True):
+                    st.caption("Ciclo Max Superato (Valore)")
+                    st.markdown(f"### {max_cycle_val_over_avg}")
+
+            with r2_c4:
                 with st.container(border=True):
                     st.caption(f"MM Attuale ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
-            with r2_c4:
+            with r2_c5:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
-
-            with r2_c5:
-                with st.container(border=True):
-                    st.caption(f"MM Massima ({finestra_ma}p)")
-                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
 
