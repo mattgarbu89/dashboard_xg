@@ -177,30 +177,27 @@ def fuzzy_match_teams(t1, t2):
     return ratio >= 0.45
 
 
-@st.cache_data(ttl=1800)
 def fetch_all_active_odds(api_key):
+    """Scarica le quote solo ed esclusivamente quando viene chiamata esplicitamente."""
     if not api_key:
-        return []
+        return [], "Nessuna API Key fornita"
 
     sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
+    req_remaining = "N/D"
     try:
         res_sports = requests.get(sports_url, timeout=10)
         if res_sports.status_code == 401:
-            st.sidebar.error("❌ API Key non valida!")
-            return []
+            return [], "API Key non valida!"
         elif res_sports.status_code == 429:
-            st.sidebar.error("⚠️ Crediti API esauriti!")
-            return []
+            return [], "Crediti API esauriti!"
         elif res_sports.status_code != 200:
-            return []
+            return [], f"Errore server API: {res_sports.status_code}"
 
-        requests_remaining = res_sports.headers.get("x-requests-remaining")
-        if requests_remaining:
-            st.sidebar.info(f"📊 Crediti API Rimanenti: {requests_remaining}")
+        req_remaining = res_sports.headers.get("x-requests-remaining", "N/D")
 
         all_sports = res_sports.json()
         soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
-    except Exception:
+    except Exception as e:
         soccer_keys = [
             "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
             "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
@@ -217,12 +214,11 @@ def fetch_all_active_odds(api_key):
                 if isinstance(data, list):
                     all_odds.extend(data)
             elif res.status_code == 429:
-                st.sidebar.error("⚠️ Quota chiamate API superata!")
                 break
         except Exception:
             continue
 
-    return all_odds
+    return all_odds, req_remaining
 
 
 def extract_best_odd(event, market_target):
@@ -572,9 +568,11 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         ]
         cols_played.extend(altre_cols)
 
-        st.dataframe(
-            df_played[cols_played].tail(15).iloc[::-1], use_container_width=True
-        )
+        df_display = df_played[cols_played].tail(15).iloc[::-1].copy()
+        for col in df_display.select_dtypes(include=['float', 'float64']).columns:
+            df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
+
+        st.dataframe(df_display, use_container_width=True)
 
 
 st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
@@ -657,6 +655,12 @@ try:
             mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
             st.sidebar.markdown("---")
 
+        # --- GESTIONE API CON SALVATAGGIO IN MEMORIA (NESSUNA CHIAMATA AUTOMATICA) ---
+        if "odds_dataset" not in st.session_state:
+            st.session_state["odds_dataset"] = []
+        if "api_req_remaining" not in st.session_state:
+            st.session_state["api_req_remaining"] = "N/D"
+
         st.sidebar.header("🔑 Configurazione Odds API")
         api_key = st.sidebar.text_input(
             "API Key:",
@@ -664,12 +668,27 @@ try:
             type="password",
         )
 
-        odds_dataset = fetch_all_active_odds(api_key) if api_key else []
+        # PULSANTE DEDICATO: L'API SI COLLEGA SOLO ED ESCLUSIVAMENTE SE PREMI QUESTO TASTO
+        if st.sidebar.button("📥 Scarica / Aggiorna Quote ora"):
+            if api_key:
+                with st.sidebar.spinner("Download quote in corso..."):
+                    data_odds, req_rem = fetch_all_active_odds(api_key)
+                    st.session_state["odds_dataset"] = data_odds
+                    st.session_state["api_req_remaining"] = req_rem
+                    
+                    if len(data_odds) > 0:
+                        st.sidebar.success(f"✅ Scaricate {len(data_odds)} quote!")
+                    else:
+                        st.sidebar.warning(f"⚠️ {req_rem}")
+            else:
+                st.sidebar.error("Inserisci prima una API Key valida.")
+
+        odds_dataset = st.session_state["odds_dataset"]
 
         if len(odds_dataset) > 0:
-            st.sidebar.success(f"Quote API Connesse ({len(odds_dataset)} match salvati)")
+            st.sidebar.info(f"📊 Quote attive in memoria: {len(odds_dataset)}\n\nCrediti Rimanenti: {st.session_state['api_req_remaining']}")
         else:
-            st.sidebar.warning("Nessuna quota scaricata. Verifica API Key o disponibilità match.")
+            st.sidebar.caption("🔴 API disconnessa (0 quote in memoria). Premere il tasto sopra per scaricarle.")
 
         if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
             st.cache_data.clear()
