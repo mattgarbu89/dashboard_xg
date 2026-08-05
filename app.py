@@ -392,20 +392,7 @@ def apply_filters(df, params):
     return df_filtered
 
 
-# ==============================================================================
-# LOGICA CALCOLO RITARDI & CICLI CORRETTA (SUI SOLI RITARDI CONCLUSI)
-# ==============================================================================
 def calculate_delays_and_cycles(win_series):
-    """Calcola:
-
-    - Ritardo Attuale (in corso)
-    - Ritardo Max (storico compreso attuale)
-    - Ritardo Medio (calcolato sui ritardi conclusi)
-    - Ciclo Max Storico (massima sequenza consecutiva di ritardi conclusi >
-    media)
-    - Ciclo Attuale (stato del conteggio di cicli consecutivi conclusi oltre la
-    media)
-    """
     esiti = win_series.tolist()
 
     ritardi_conclusi = []
@@ -418,10 +405,8 @@ def calculate_delays_and_cycles(win_series):
         else:
             ritardo_corrente += 1
 
-    # 1. RITARDO ATTUALE
     ritardo_attuale = ritardo_corrente
 
-    # 2. RITARDO MAX
     tutti_i_ritardi = (
         ritardi_conclusi + [ritardo_attuale]
         if ritardi_conclusi
@@ -429,13 +414,11 @@ def calculate_delays_and_cycles(win_series):
     )
     ritardo_max = max(tutti_i_ritardi) if tutti_i_ritardi else 0
 
-    # 3. RITARDO MEDIO (sui soli conclusi)
     if len(ritardi_conclusi) > 0:
         ritardo_medio = sum(ritardi_conclusi) / len(ritardi_conclusi)
     else:
         ritardo_medio = 0.0
 
-    # 4. CALCOLO CICLI SOLO SULLE SERIE CHIUSE (CONCLUSE CON WIN)
     ciclo_max_storico = 0
     ciclo_consecutivo_corrente = 0
 
@@ -447,8 +430,6 @@ def calculate_delays_and_cycles(win_series):
         else:
             ciclo_consecutivo_corrente = 0
 
-    # CICLO ATTUALE: Mostra quanti cicli consecutivi *già conclusi* hanno superato il ritardo medio.
-    # Non incrementa finché l'eventuale ritardo in corso non viene prima validato e chiuso da una WIN.
     ciclo_attuale = ciclo_consecutivo_corrente
 
     return {
@@ -485,7 +466,6 @@ def get_sorted_strategies(df_base, strategie_dict):
 
 
 def get_combination_string(params):
-    """Genera la stringa che esplicita la combinazione di parametri usata."""
     condizioni = []
     mercato = params.get("MERCATO", "N/D")
 
@@ -788,7 +768,6 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO COMPLETO METRICHE RITARDI E CICLI CON LA NUOVA LOGICA
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
                 if tot_match > 0
@@ -849,8 +828,8 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # SECONDA RIGA METRICHE RITARDI MEDI E CICLI
-            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
+            # SECONDA RIGA METRICHE RITARDI MEDI, CICLI E MEDIE MOBILI (6 COLONNE)
+            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
             with r2_c1:
                 with st.container(border=True):
                     st.caption("Ritardo Medio")
@@ -875,6 +854,11 @@ try:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c6:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
 
@@ -904,7 +888,6 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO COMPLETO METRICHE RITARDI E CICLI CON LA NUOVA LOGICA
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
                 if tot_match > 0
@@ -963,8 +946,8 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # SECONDA RIGA METRICHE RITARDI MEDI E CICLI
-            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
+            # SECONDA RIGA METRICHE RITARDI MEDI, CICLI E MEDIE MOBILI (6 COLONNE)
+            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
             with r2_c1:
                 with st.container(border=True):
                     st.caption("Ritardo Medio")
@@ -989,6 +972,11 @@ try:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c6:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
 
