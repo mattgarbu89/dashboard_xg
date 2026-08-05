@@ -222,8 +222,8 @@ def fetch_all_active_odds(api_key):
 
 
 def extract_bet365_odd(event, market_target):
-    """Estrae la quota ESCLUSIVAMENTE da Bet365."""
-    m_target = str(market_target).upper().strip()
+    """Estrae la quota ESCLUSIVAMENTE da Bet365 gestendo piu varianti del bookmaker e mercati derivati."""
+    m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
 
@@ -232,7 +232,9 @@ def extract_bet365_odd(event, market_target):
 
     bet365_bkm = None
     for bkm in event.get("bookmakers", []):
-        if bkm.get("key", "").lower() == "bet365":
+        bkm_key = bkm.get("key", "").lower()
+        bkm_title = bkm.get("title", "").lower()
+        if "bet365" in bkm_key or "bet365" in bkm_title:
             bet365_bkm = bkm
             break
 
@@ -247,9 +249,9 @@ def extract_bet365_odd(event, market_target):
             for out in outcomes:
                 price = float(out.get("price", 0))
                 name = out.get("name", "")
-                if name == ev_home:
+                if name == ev_home or fuzzy_match_teams(name, ev_home):
                     odds_1 = price
-                elif name == ev_away:
+                elif name == ev_away or fuzzy_match_teams(name, ev_away):
                     odds_2 = price
                 elif name in ["Draw", "X"]:
                     odds_x = price
@@ -271,13 +273,21 @@ def extract_bet365_odd(event, market_target):
         return odds_x
     elif m_target == "2":
         return odds_2
-    elif m_target == "1X":
-        return round(1 / ((1 / odds_1) + (1 / odds_x)), 2) if (odds_1 and odds_x) else odds_1
-    elif m_target == "X2":
-        return round(1 / ((1 / odds_2) + (1 / odds_x)), 2) if (odds_2 and odds_x) else odds_2
-    elif "OVER" in m_target:
+    elif m_target in ["1X", "1/X"]:
+        if odds_1 and odds_x:
+            return round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
+        return odds_1
+    elif m_target in ["X2", "X/2"]:
+        if odds_2 and odds_x:
+            return round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
+        return odds_2
+    elif m_target in ["12", "1/2"]:
+        if odds_1 and odds_2:
+            return round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
+        return odds_1
+    elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
         return over_25
-    elif "UNDER" in m_target:
+    elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
         return under_25
     elif m_target == "ESITO 1-1":
         return odds_x
@@ -860,7 +870,6 @@ try:
 
             st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
 
-            # PRIMA RIGA METRICHE BASE
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
@@ -887,7 +896,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # SECONDA RIGA METRICHE RITARDI MEDI, CICLI E MEDIE MOBILI (6 COLONNE)
             r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
             with r2_c1:
                 with st.container(border=True):
@@ -978,7 +986,6 @@ try:
 
             st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo (Database Completo)")
 
-            # PRIMA RIGA METRICHE BASE
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
@@ -1005,7 +1012,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # SECONDA RIGA METRICHE RITARDI MEDI, CICLI E MEDIE MOBILI (6 COLONNE)
             r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
             with r2_c1:
                 with st.container(border=True):
@@ -1055,7 +1061,6 @@ try:
 
             cicli_target = []
 
-            # 1. Scansione Strategie Salvate
             for item in ranked_strategies:
                 name = item["nome"]
                 params = item["params"]
@@ -1085,7 +1090,6 @@ try:
                             "Filtri / Dettagli": get_combination_string(params),
                         })
 
-            # 2. Scansione Mercati Totali Generici
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None, "DC": None, "C1": None, "C2": None,
