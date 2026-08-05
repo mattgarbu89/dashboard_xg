@@ -305,7 +305,6 @@ def evaluate_market(row, market):
     gt = gc + go
     m = str(market).upper().strip()
 
-    # ESITI FINALI
     if m == "1":
         return int(gc > go)
     elif m == "X":
@@ -321,13 +320,11 @@ def evaluate_market(row, market):
     elif m == "ESITO 1-1":
         return int(gc == 1 and go == 1)
 
-    # GOL / NO GOL
     elif m == "GOL":
         return int(gc > 0 and go > 0)
     elif m in ["NO GOL", "NOGOL", "MOGOL"]:
         return int(gc == 0 or go == 0)
 
-    # OVER / UNDER GENERALI
     elif m in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
     elif m in ["OVER 2,5", "OVER 2.5"]:
@@ -341,7 +338,6 @@ def evaluate_market(row, market):
     elif m in ["UNDER 3,5", "UNDER 3.5"]:
         return int(gt < 3.5)
 
-    # MERCATI CASA
     elif m == "GOL CASA":
         return int(gc > 0)
     elif m in ["OVER 1,5 CASA", "OVER 1.5 CASA"]:
@@ -353,7 +349,6 @@ def evaluate_market(row, market):
     elif m in ["UNDER 2,5 CASA", "UNDER 2.5 CASA"]:
         return int(gc < 2.5)
 
-    # MERCATI OSPITE
     elif m == "GOL OSPITE":
         return int(go > 0)
     elif m in ["OVER 1,5 OSPITE", "OVER 1.5 OSPITE"]:
@@ -398,6 +393,7 @@ def apply_filters(df, params):
 
 
 def calculate_delays(win_series):
+    """Calcola il ritardo attuale e il ritardo massimo storico."""
     current_delay = 0
     max_delay = 0
     temp_delay = 0
@@ -416,6 +412,28 @@ def calculate_delays(win_series):
             break
 
     return current_delay, max_delay
+
+
+def calculate_delay_cycles(win_series):
+    """NUOVA FUNZIONE: Calcola la media dei cicli di ritardo e il numero totale di cicli."""
+    cycles = []
+    current_count = 0
+    
+    for win in win_series:
+        if win == 0:
+            current_count += 1
+        elif win == 1:
+            if current_count > 0:
+                cycles.append(current_count)
+                current_count = 0
+
+    # Consideriamo anche il ciclo in corso se c'è un ritardo attivo
+    if current_count > 0:
+        cycles.append(current_count)
+
+    avg_cycle = (sum(cycles) / len(cycles)) if cycles else 0.0
+    total_cycles = len(cycles)
+    return avg_cycle, total_cycles
 
 
 def get_sorted_strategies(df_base, strategie_dict):
@@ -529,22 +547,18 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        # COSTRUZIONE DINAMICA DELLE COLONNE DA MOSTRARE PER ULTIME PARTITE PROCESSATE
         cols_played = []
 
-        # 1. Data e Orario se presenti
         for c in df_played.columns:
             if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
                 if c not in cols_played:
                     cols_played.append(c)
 
-        # 2. Forziamo SEMPRE le colonne Squadra Casa e Squadra Ospite scelte dall'utente
         if col_casa and col_casa in df_played.columns and col_casa not in cols_played:
             cols_played.append(col_casa)
         if col_ospite and col_ospite in df_played.columns and col_ospite not in cols_played and col_ospite != col_casa:
             cols_played.append(col_ospite)
 
-        # 3. Altre colonne rilevanti (Risultati, Parametri, WIN)
         altre_cols = [
             c for c in df_played.columns
             if any(
@@ -609,7 +623,6 @@ try:
         ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
         strat_map = {item["nome"]: item for item in ranked_strategies}
 
-        # LISTA COMPLETA DEI MERCATI PER DATABASE TOTALE
         MERCATI_TOTALI = [
             "1", "X", "2", "1X", "X2", "12",
             "GOL", "NO GOL",
@@ -751,6 +764,7 @@ try:
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
             current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
+            avg_cycle_delay, total_cycles = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0.0, 0)
 
             st.sidebar.markdown("---")
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -771,18 +785,18 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metriche Principali")
+            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
 
-            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
-            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI
+            r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
-                    st.caption("Match Totali Giocati")
+                    st.caption("Match Totali")
                     st.markdown(f"### {tot_match}")
 
             with r1_c2:
                 with st.container(border=True):
-                    st.caption("Win Rate Reale (%)")
+                    st.caption("Win Rate Reale")
                     st.markdown(f"### {format_num_comma(win_rate_reale)}%")
 
             with r1_c3:
@@ -792,28 +806,38 @@ try:
 
             with r1_c4:
                 with st.container(border=True):
-                    st.caption("Ritardo Attuale (Match)")
+                    st.caption("Ritardo Attuale")
                     st.markdown(f"### {current_delay}")
 
-            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+            with r1_c5:
+                with st.container(border=True):
+                    st.caption("Ritardo Max Storico")
+                    st.markdown(f"### {max_delay}")
+
+            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
             with r2_c1:
                 with st.container(border=True):
-                    st.caption("Ritardo Max Storico (Match)")
-                    st.markdown(f"### {max_delay}")
+                    st.caption("Ritardo Medio (Cicli)")
+                    st.markdown(f"### {format_num_comma(avg_cycle_delay, 1)}")
 
             with r2_c2:
                 with st.container(border=True):
-                    st.caption(f"MM Attuale ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
+                    st.caption("Totale Cicli Ritardo")
+                    st.markdown(f"### {total_cycles}")
 
             with r2_c3:
                 with st.container(border=True):
-                    st.caption(f"MM Minima ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+                    st.caption(f"MM Attuale ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
             with r2_c4:
                 with st.container(border=True):
-                    st.caption(f"MM Massima ({finestra_ma} match)")
+                    st.caption(f"MM Minima ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c5:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
@@ -845,6 +869,7 @@ try:
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
             current_delay, max_delay = calculate_delays(df_played["WIN"]) if tot_match > 0 else (0, 0)
+            avg_cycle_delay, total_cycles = calculate_delay_cycles(df_played["WIN"]) if tot_match > 0 else (0.0, 0)
 
             st.sidebar.markdown("---")
             finestra_ma = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 50, 20, 5)
@@ -863,18 +888,18 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params_tot))
 
-            st.markdown("#### 📈 Metriche Principali (Database Completo)")
+            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo (Database Completo)")
 
-            # BLOCCO VISIVO SU 2 RIGHE E 4 COLONNE
-            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            # BLOCCO VISIVO METRICHE INTEGRATO CON I CICLI DI RITARDO MEDI
+            r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
                 with st.container(border=True):
-                    st.caption("Match Totali Giocati")
+                    st.caption("Match Totali")
                     st.markdown(f"### {tot_match}")
 
             with r1_c2:
                 with st.container(border=True):
-                    st.caption("Win Rate Reale (%)")
+                    st.caption("Win Rate Reale")
                     st.markdown(f"### {format_num_comma(win_rate_reale)}%")
 
             with r1_c3:
@@ -884,28 +909,38 @@ try:
 
             with r1_c4:
                 with st.container(border=True):
-                    st.caption("Ritardo Attuale (Match)")
+                    st.caption("Ritardo Attuale")
                     st.markdown(f"### {current_delay}")
 
-            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+            with r1_c5:
+                with st.container(border=True):
+                    st.caption("Ritardo Max Storico")
+                    st.markdown(f"### {max_delay}")
+
+            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
             with r2_c1:
                 with st.container(border=True):
-                    st.caption("Ritardo Max Storico (Match)")
-                    st.markdown(f"### {max_delay}")
+                    st.caption("Ritardo Medio (Cicli)")
+                    st.markdown(f"### {format_num_comma(avg_cycle_delay, 1)}")
 
             with r2_c2:
                 with st.container(border=True):
-                    st.caption(f"MM Attuale ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
+                    st.caption("Totale Cicli Ritardo")
+                    st.markdown(f"### {total_cycles}")
 
             with r2_c3:
                 with st.container(border=True):
-                    st.caption(f"MM Minima ({finestra_ma} match)")
-                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+                    st.caption(f"MM Attuale ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
             with r2_c4:
                 with st.container(border=True):
-                    st.caption(f"MM Massima ({finestra_ma} match)")
+                    st.caption(f"MM Minima ({finestra_ma}p)")
+                    st.markdown(f"### {format_num_comma(mm_min, 1)}%")
+
+            with r2_c5:
+                with st.container(border=True):
+                    st.caption(f"MM Massima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_max, 1)}%")
 
             st.markdown("---")
