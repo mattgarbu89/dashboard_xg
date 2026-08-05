@@ -393,16 +393,18 @@ def apply_filters(df, params):
 
 
 # ==============================================================================
-# NUOVA FUNZIONE COMPLETA PER CALCOLO RITARDI & CICLI CONSECUTIVI
+# LOGICA CALCOLO RITARDI & CICLI CORRETTA (SUI SOLI RITARDI CONCLUSI)
 # ==============================================================================
 def calculate_delays_and_cycles(win_series):
     """Calcola:
 
-    - Ritardo Attuale
-    - Ritardo Max
-    - Ritardo Medio
-    - Ciclo Max Storico (cicli consecutivi oltre il ritardo medio)
-    - Ciclo Attuale
+    - Ritardo Attuale (in corso)
+    - Ritardo Max (storico compreso attuale)
+    - Ritardo Medio (calcolato sui ritardi conclusi)
+    - Ciclo Max Storico (massima sequenza consecutiva di ritardi conclusi >
+    media)
+    - Ciclo Attuale (stato del conteggio di cicli consecutivi conclusi oltre la
+    media)
     """
     esiti = win_series.tolist()
 
@@ -419,7 +421,7 @@ def calculate_delays_and_cycles(win_series):
     # 1. RITARDO ATTUALE
     ritardo_attuale = ritardo_corrente
 
-    # 2. RITARDO MAX (storico completo compreso l'attuale)
+    # 2. RITARDO MAX
     tutti_i_ritardi = (
         ritardi_conclusi + [ritardo_attuale]
         if ritardi_conclusi
@@ -427,13 +429,13 @@ def calculate_delays_and_cycles(win_series):
     )
     ritardo_max = max(tutti_i_ritardi) if tutti_i_ritardi else 0
 
-    # 3. RITARDO MEDIO
+    # 3. RITARDO MEDIO (sui soli conclusi)
     if len(ritardi_conclusi) > 0:
         ritardo_medio = sum(ritardi_conclusi) / len(ritardi_conclusi)
     else:
         ritardo_medio = 0.0
 
-    # 4. CICLO MAX STORICO (cicli consecutivi oltre il ritardo medio)
+    # 4. CALCOLO CICLI SOLO SULLE SERIE CHIUSE (CONCLUSE CON WIN)
     ciclo_max_storico = 0
     ciclo_consecutivo_corrente = 0
 
@@ -445,10 +447,9 @@ def calculate_delays_and_cycles(win_series):
         else:
             ciclo_consecutivo_corrente = 0
 
-    # 5. CICLO ATTUALE
+    # CICLO ATTUALE: Mostra quanti cicli consecutivi *già conclusi* hanno superato il ritardo medio.
+    # Non incrementa finché l'eventuale ritardo in corso non viene prima validato e chiuso da una WIN.
     ciclo_attuale = ciclo_consecutivo_corrente
-    if ritardo_attuale > ritardo_medio:
-        ciclo_attuale += 1
 
     return {
         "ritardo_attuale": ritardo_attuale,
@@ -786,7 +787,7 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO COMPLETO METRICHE RITARDI E CICLI
+            # CALCOLO COMPLETO METRICHE RITARDI E CICLI CON LA NUOVA LOGICA
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
                 if tot_match > 0
@@ -902,7 +903,7 @@ try:
             win_rate_reale = (df_played["WIN"].sum() / tot_match * 100) if tot_match > 0 else 0
             quota_limite = (100 / win_rate_reale) if win_rate_reale > 0 else 0
 
-            # CALCOLO COMPLETO METRICHE RITARDI E CICLI
+            # CALCOLO COMPLETO METRICHE RITARDI E CICLI CON LA NUOVA LOGICA
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
                 if tot_match > 0
