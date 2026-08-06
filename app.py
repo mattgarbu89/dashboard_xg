@@ -351,19 +351,25 @@ def format_num_comma(val, decimals=2):
 
 
 def get_clean_team_names(row, col_casa, col_ospite):
+    """Estrae e separa in modo pulito i nomi delle due squadre evitando ripetizioni."""
     val_casa = str(row.get(col_casa, "")).strip()
     val_ospite = str(row.get(col_ospite, "")).strip()
 
-    if col_casa == col_ospite and ("-" in val_casa or "v" in val_casa):
-        parts = re.split(r"\s+[-vV]\s+", val_casa)
+    regex_separatori = r"\s+(?:vs|v|-)\s+"
+
+    # Caso 1: La colonna casa contiene già l'intera stringa (es. "Göteborg vs Kalmar")
+    if re.search(regex_separatori, val_casa, re.IGNORECASE):
+        parts = re.split(regex_separatori, val_casa, flags=re.IGNORECASE)
         if len(parts) >= 2:
             return parts[0].strip(), parts[1].strip()
 
-    if "-" in val_casa and val_casa == val_ospite:
-        parts = val_casa.split("-")
+    # Caso 2: La colonna ospite contiene l'intera stringa
+    if re.search(regex_separatori, val_ospite, re.IGNORECASE):
+        parts = re.split(regex_separatori, val_ospite, flags=re.IGNORECASE)
         if len(parts) >= 2:
             return parts[0].strip(), parts[1].strip()
 
+    # Caso 3: Le colonne sono distinte e separate normalmente
     return val_casa or "Casa", val_ospite or "Ospite"
 
 
@@ -1324,7 +1330,7 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metmetriche Principali & Cicli di Ritardo")
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
