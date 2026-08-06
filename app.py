@@ -332,26 +332,45 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
-        df_future["Quota Limite"] = format_num_comma(quota_limite)
+        st.info("💡 Inserisci la quota attuale trovata sul tuo bookmaker per verificare se c'è Value Bet.")
+        
+        # Creiamo un ciclo interattivo riga per riga per le prossime partite
+        for idx, row in df_future.iterrows():
+            c_info, c_qlim, c_qinput, c_val = st.columns([3, 1.5, 1.5, 2])
+            
+            nome_casa = str(row.get(col_casa, 'Casa'))
+            nome_ospite = str(row.get(col_ospite, 'Ospite'))
+            data_match = ""
+            for col_d in df_future.columns:
+                if "DATA" in str(col_d).upper():
+                    data_match = f" ({row[col_d]})"
+                    break
 
-        cols_finali = []
-        for c in df_future.columns:
-            if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
-                if c not in cols_finali:
-                    cols_finali.append(c)
+            with c_info:
+                st.markdown(f"**{nome_casa} - {nome_ospite}**{data_match}")
+                
+            with c_qlim:
+                st.markdown(f"Quota Limite: **{format_num_comma(quota_limite)}**")
 
-        if col_casa and col_casa in df_future.columns and col_casa not in cols_finali:
-            cols_finali.append(col_casa)
-        if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali and col_ospite != col_casa:
-            cols_finali.append(col_ospite)
+            with c_qinput:
+                quota_utente = st.number_input(
+                    "Inserisci Quota:",
+                    min_value=1.00,
+                    max_value=50.00,
+                    value=1.00,
+                    step=0.05,
+                    key=f"quota_input_{idx}_{nome_casa}"
+                )
 
-        cols_finali.append("Quota Limite")
-        cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
-
-        df_future_display = df_future[cols_finali_clean].copy()
-        df_future_display.index = range(1, len(df_future_display) + 1)
-
-        st.dataframe(df_future_display, use_container_width=True)
+            with c_val:
+                if quota_utente > 1.00:
+                    if quota_utente >= quota_limite:
+                        st.success(f"🟢 **VALUE BET!** (+{format_num_comma(quota_utente - quota_limite)})")
+                    else:
+                        st.error(f"🔴 **NO VALUE** ({format_num_comma(quota_utente)})")
+                else:
+                    st.caption("Inserisci quota...")
+            st.divider()
     else:
         st.info("Nessuna prossima partita trovata per questa selezione.")
 
