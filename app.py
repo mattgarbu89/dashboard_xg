@@ -76,7 +76,6 @@ def genera_e_invia_report_48h_strategie(
     df_base, strategie_dict, col_casa, col_ospite
 ):
     """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h."""
-    quote_salvate = carica_quote_locali()
     adesso = datetime.now()
     limite_48h = adesso + timedelta(hours=48)
 
@@ -137,6 +136,7 @@ def genera_e_invia_report_48h_strategie(
             report_strats[strat_nome] = {
                 "quota_limite": quota_limite_strat,
                 "matches": df_48h,
+                "mercato": params.get("MERCATO", ""),
             }
             totale_match_trovati += len(df_48h)
 
@@ -159,19 +159,23 @@ def genera_e_invia_report_48h_strategie(
     for strat_nome, data in report_strats.items():
         q_limite = data["quota_limite"]
         df_m = data["matches"]
+        m_strat = data["mercato"]
 
         messaggio += f"📌 *STRATEGIA:* `{strat_nome}`\n"
         messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
 
         for idx, row in df_m.iterrows():
             casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
-            m_key = get_match_key(row, col_casa, col_ospite)
+            m_key, generic_key = get_match_keys(row, col_casa, col_ospite, m_strat)
 
             dt_str = (
                 row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M")
                 if pd.notna(row["DATETIME_MATCH"])
                 else "N/D"
             )
+            
+            # Controlla se c'è quota salvata specifica per questo mercato
+            quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
 
             messaggio += f"⚽ *{casa} - {ospite}*\n"
@@ -187,8 +191,8 @@ def genera_e_invia_report_48h_strategie(
                 else:
                     messaggio += "STATUS: 🔴 *NO VALUE*\n"
             else:
-                messaggio += "💰 *Quota Trovata:* ⚠️ *NON TROVATA*\n"
-                messaggio += "STATUS: ⏳ *IN ATTESA DI INSERIMENTO*\n"
+                messaggio += "💰 *Quota Trovata:* ⚠️ *NON TROVATA PER QUESTO MERCATO*\n"
+                messaggio += "STATUS: ⏳ *IN ATTESA DI CONFERMA/SALVATAGGIO*\n"
 
             messaggio += "----------------------------------\n"
         messaggio += "\n"
@@ -229,7 +233,6 @@ def format_num_comma(val, decimals=2):
 
 
 def get_clean_team_names(row, col_casa, col_ospite):
-    """Estrae e pulisce i nomi delle squadre per evitare duplicazioni tipo 'U. Catolica - Cobresal - U. Catolica - Cobresal'."""
     val_casa = str(row.get(col_casa, "")).strip()
     val_ospite = str(row.get(col_ospite, "")).strip()
 
@@ -246,16 +249,38 @@ def get_clean_team_names(row, col_casa, col_ospite):
     return val_casa or "Casa", val_ospite or "Ospite"
 
 
-def get_match_key(row, col_casa, col_ospite):
-    """Genera una chiave univoca e consistente per identificare la partita."""
+def get_match_keys(row, col_casa, col_ospite, mercato=""):
+    """Restituisce sia la chiave specifica (Partita + Mercato) che la chiave generica (Solo Partita)."""
     casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
     data_match = ""
     for c in row.index:
         if "DATA" in str(c).upper():
             data_match = str(row[c]).strip()
             break
-    clean_key = f"{data_match}_{casa}_{ospite}".lower()
-    return re.sub(r"\s+", " ", clean_key)
+
+    mercato_clean = str(mercato).lower().strip()
+    generic_key = f"{data_match}_{casa}_{ospite}".lower()
+    generic_key = re.sub(r"\s+", " ", generic_key)
+    
+    specific_key = f"{generic_key}_{mercato_clean}"
+    return specific_key, generic_key
+
+
+def carica_quota_con_fallback(chiave_specifica, chiave_generica):
+    """Cerca la quota per lo specifico mercato; se non c'è, recupera l'ultima inserita per la partita."""
+    quote = carica_quote_locali()
+
+    # 1. Quota esatta salvata per questo mercato
+    if chiave_specifica in quote:
+        return quote[chiave_specifica], True
+
+    # 2. Fallback: cerca qualsiasi altra quota inserita per la stessa partita
+    for k, v in quote.items():
+        if k.startswith(chiave_generica):
+            return v, False
+
+    # 3. Nessuna quota trovata
+    return 1.00, False
 
 
 def load_clean_df(file_bytes):
@@ -599,7 +624,7 @@ def get_combination_string(params):
     )
 
 
-def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
+def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()]
         .copy()
@@ -611,17 +636,15 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
         .reset_index(drop=True)
     )
 
-    quote_salvate = carica_quote_locali()
-
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
         st.info(
-            "💡 Inserisci la quota, premi **💾 Salva**. Puoi modificarla e risalvarla quante volte vuoi."
+            "💡 Le quote già inserite per questa partita in altri mercati vengono proposte in automatico. Premi **💾 Salva** per memorizzarle per questo specifico mercato."
         )
 
         for idx, row in df_future.iterrows():
-            m_key = get_match_key(row, col_casa, col_ospite)
+            m_key, generic_key = get_match_keys(row, col_casa, col_ospite, mercato)
             nome_casa, nome_ospite = get_clean_team_names(
                 row, col_casa, col_ospite
             )
@@ -644,14 +667,15 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
                     f"Quota Limite: **{format_num_comma(quota_limite)}**"
                 )
 
-            val_salvato = quote_salvate.get(m_key, 1.00)
+            # Recupero con Fallback intelligente
+            val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
 
             with c_input:
                 q_val = st.number_input(
                     "Quota Trovata",
                     min_value=1.00,
                     max_value=50.00,
-                    value=float(val_salvato),
+                    value=float(val_proposto),
                     step=0.05,
                     key=f"input_{m_key}",
                 )
@@ -664,18 +688,17 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
                 if st.button("💾 Salva", key=f"btn_{m_key}"):
                     salva_quota_locale(m_key, q_val)
                     st.toast(
-                        f"Quota {format_num_comma(q_val)} salvata per {nome_casa} - {nome_ospite}!"
+                        f"Quota {format_num_comma(q_val)} salvata per {nome_casa} - {nome_ospite} ({mercato})!"
                     )
                     st.rerun()
 
             with c_res:
-                quota_effettiva = quote_salvate.get(m_key, None)
-
-                # Stato Salvataggio (Verifica se modificata rispetto al JSON)
-                if abs(float(q_val) - float(val_salvato)) > 0.001:
+                if abs(float(q_val) - float(val_proposto)) > 0.001:
                     st.caption("⚠️ *Modificata (non salvata)*")
-                elif quota_effettiva is not None:
-                    st.caption("✅ *Quota Salvata*")
+                elif e_esatta:
+                    st.caption("✅ *Quota Salvata (Mercato)*")
+                elif val_proposto > 1.00:
+                    st.caption("💡 *Quota Suggerita (da altro mercato)*")
                 else:
                     st.caption("⏳ *In attesa*")
 
@@ -693,9 +716,12 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
+        quote_salvate = carica_quote_locali()
         df_played["QUOTA SALVATA"] = df_played.apply(
             lambda r: format_num_comma(
-                quote_salvate.get(get_match_key(r, col_casa, col_ospite), None)
+                quote_salvate.get(
+                    get_match_keys(r, col_casa, col_ospite, mercato)[0], None
+                )
             ),
             axis=1,
         )
@@ -1191,7 +1217,13 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(df_strat, quota_limite, col_casa, col_ospite)
+            render_tables(
+                df_strat,
+                quota_limite,
+                col_casa,
+                col_ospite,
+                mercato=params["MERCATO"],
+            )
 
         elif "📂" in modalita:
             st.subheader(
@@ -1326,7 +1358,13 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(df_tot, quota_limite, col_casa, col_ospite)
+            render_tables(
+                df_tot,
+                quota_limite,
+                col_casa,
+                col_ospite,
+                mercato=mercato_totale_sel,
+            )
 
         elif "🔥" in modalita:
             st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
