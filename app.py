@@ -1109,7 +1109,9 @@ try:
 
         # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
-            st.subheader("🚨 Report Strategie: Sottoperformance & Bounce Back")
+            st.subheader(
+                "🚨 Report Strategie & Mercati Totali: Sottoperformance & Bounce Back"
+            )
 
             finestra_alert = st.sidebar.slider(
                 "Finestra Media Mobile per Alert", 10, 50, 20, 5
@@ -1117,6 +1119,9 @@ try:
 
             alert_underperforming, alert_bounce_back = [], []
 
+            # -------------------------------------------------------------
+            # 1. SCANSIONE STRATEGIE SALVATE
+            # -------------------------------------------------------------
             for item in ranked_strategies:
                 name = item["nome"]
                 win_rate_storico = item["win_rate_storico"]
@@ -1138,9 +1143,11 @@ try:
                     mm_att = ma_series.iloc[-1]
                     diff_storica = mm_att - win_rate_storico
 
+                    # Se la Media Mobile attuale è inferiore al Win Rate Storico Target
                     if mm_att < win_rate_storico:
                         alert_underperforming.append({
-                            "Strategia": name,
+                            "Tipo": "Strategia Salvata",
+                            "Nome / Mercato": name,
                             "Mercato": params["MERCATO"],
                             "Match Giocati": tot_strat,
                             "WR Storico Target": (
@@ -1155,18 +1162,18 @@ try:
                             "Scostamento vs Storico": (
                                 f"{format_num_comma(diff_storica, 1)}%"
                             ),
-                            "Combinazione Filtri": get_combination_string(
-                                params
-                            ),
+                            "Filtri / Dettagli": get_combination_string(params),
                         })
 
+                        # Controllo Bounce Back (Rimbalzo)
                         last_win = df_strat_played["WIN"].iloc[-1]
                         if last_win == 1 and len(ma_series) >= 2:
                             mm_prev = ma_series.iloc[-2]
                             diff_bounce = mm_att - mm_prev
 
                             alert_bounce_back.append({
-                                "Strategia": name,
+                                "Tipo": "Strategia Salvata",
+                                "Nome / Mercato": name,
                                 "Mercato": params["MERCATO"],
                                 "WR Storico Target": (
                                     f"{format_num_comma(win_rate_storico)}%"
@@ -1181,12 +1188,100 @@ try:
                                     f"+{format_num_comma(diff_bounce, 1)}%"
                                 ),
                                 "Ultimo Esito": "WIN",
-                                "Combinazione Filtri": get_combination_string(
+                                "Filtri / Dettagli": get_combination_string(
                                     params
                                 ),
                             })
 
-            st.markdown("### SEGNALI DI RIENTRO IN TREND (Bounce Back)")
+            # -------------------------------------------------------------
+            # 2. SCANSIONE MERCATI DEL DATABASE TOTALE
+            # -------------------------------------------------------------
+            for m in MERCATI_TOTALI:
+                params_m = {
+                    "SOMMA": None,
+                    "DC": None,
+                    "C1": None,
+                    "C2": None,
+                    "MEDIA CASA": None,
+                    "MEDIA OSPITE": None,
+                    "MERCATO": m,
+                }
+                df_m = apply_filters(df_base, params_m)
+                df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+                tot_m = len(df_played_m)
+
+                if tot_m >= finestra_alert:
+                    wr_reale_m = (
+                        (df_played_m["WIN"].sum() / tot_m * 100)
+                        if tot_m > 0
+                        else 0
+                    )
+
+                    df_played_m["MA"] = (
+                        df_played_m["WIN"].rolling(window=finestra_alert).mean()
+                        * 100
+                    )
+                    ma_series_m = df_played_m["MA"].dropna()
+                    mm_att_m = ma_series_m.iloc[-1]
+                    diff_m = mm_att_m - wr_reale_m
+
+                    # Se la Media Mobile di quel mercato è sotto la sua media storica reale
+                    if mm_att_m < wr_reale_m:
+                        alert_underperforming.append({
+                            "Tipo": "Mercato Totale DB",
+                            "Nome / Mercato": f"Database Totale - {m}",
+                            "Mercato": m,
+                            "Match Giocati": tot_m,
+                            "WR Storico Target": (
+                                f"{format_num_comma(wr_reale_m)}%"
+                            ),
+                            "WR Attuale Reale": (
+                                f"{format_num_comma(wr_reale_m)}%"
+                            ),
+                            f"MM Attuale ({finestra_alert}p)": (
+                                f"{format_num_comma(mm_att_m, 1)}%"
+                            ),
+                            "Scostamento vs Storico": (
+                                f"{format_num_comma(diff_m, 1)}%"
+                            ),
+                            "Filtri / Dettagli": (
+                                "Database Totale (Senza filtri extra)"
+                            ),
+                        })
+
+                        last_win_m = df_played_m["WIN"].iloc[-1]
+                        if last_win_m == 1 and len(ma_series_m) >= 2:
+                            mm_prev_m = ma_series_m.iloc[-2]
+                            diff_bounce_m = mm_att_m - mm_prev_m
+
+                            alert_bounce_back.append({
+                                "Tipo": "Mercato Totale DB",
+                                "Nome / Mercato": f"Database Totale - {m}",
+                                "Mercato": m,
+                                "WR Storico Target": (
+                                    f"{format_num_comma(wr_reale_m)}%"
+                                ),
+                                f"MM Precedente ({finestra_alert}p)": (
+                                    f"{format_num_comma(mm_prev_m, 1)}%"
+                                ),
+                                f"MM Attuale ({finestra_alert}p)": (
+                                    f"{format_num_comma(mm_att_m, 1)}%"
+                                ),
+                                "Rimbalzo": (
+                                    f"+{format_num_comma(diff_bounce_m, 1)}%"
+                                ),
+                                "Ultimo Esito": "WIN",
+                                "Filtri / Dettagli": (
+                                    "Database Totale (Senza filtri extra)"
+                                ),
+                            })
+
+            # -------------------------------------------------------------
+            # RENDER TABELLE RISULTATI
+            # -------------------------------------------------------------
+            st.markdown(
+                "### 🚀 SEGNALI DI RIENTRO IN TREND (Bounce Back / Rimbalzo)"
+            )
             if alert_bounce_back:
                 st.dataframe(
                     pd.DataFrame(alert_bounce_back), use_container_width=True
@@ -1196,14 +1291,18 @@ try:
 
             st.markdown("---")
 
-            st.markdown("### STRATEGIE IN SOTTOPERFORMANCE")
+            st.markdown(
+                "### 📉 STRATEGIE E MERCATI IN SOTTOPERFORMANCE (Da Tenere d'Occhio)"
+            )
             if alert_underperforming:
                 st.dataframe(
                     pd.DataFrame(alert_underperforming),
                     use_container_width=True,
                 )
             else:
-                st.info("Tutte le strategie stabili sopra la media target.")
+                st.info(
+                    "Tutte le strategie e i mercati sono stabili sopra la loro media target."
+                )
 
         elif "📊" in modalita:
             strat_info = strat_map[strat_nome]
