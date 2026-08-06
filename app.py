@@ -1,4 +1,6 @@
 import io
+import json
+import os
 import re
 import zipfile
 import pandas as pd
@@ -12,22 +14,46 @@ st.set_page_config(
 )
 
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
+FILE_QUOTE_LOCALE = "quote_salvate.json"
 
-# Inizializzazione dello stato per salvare le quote inserite dall'utente
+# ==========================================
+# GESTIONE SALVATAGGIO PERMANENTE SU DISCO
+# ==========================================
+def carica_quote_locali():
+    """Carica il dizionario delle quote salvate dal file JSON locale."""
+    if os.path.exists(FILE_QUOTE_LOCALE):
+        try:
+            with open(FILE_QUOTE_LOCALE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def salva_quota_locale(chiave_match, valore_quota):
+    """Salva una singola quota all'interno del file JSON locale."""
+    quote = carica_quote_locali()
+    quote[chiave_match] = valore_quota
+    with open(FILE_QUOTE_LOCALE, "w", encoding="utf-8") as f:
+        json.dump(quote, f, indent=4, ensure_ascii=False)
+    # Aggiorna anche la sessione attiva
+    st.session_state["saved_odds"][chiave_match] = valore_quota
+
+# Inizializzazione Session State dal file locale all'avvio dell'app
 if "saved_odds" not in st.session_state:
-    st.session_state["saved_odds"] = {}
+    st.session_state["saved_odds"] = carica_quote_locali()
 
 
+# ==========================================
+# UTILITÀ E PULIZIA DATI
+# ==========================================
 def get_drive_direct_url(url):
     file_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if file_id_match:
         return f"https://docs.google.com/spreadsheets/d/{file_id_match.group(1)}/export?format=xlsx"
     return url
 
-
 def clean_numeric_column(series):
     return pd.to_numeric(series.astype(str).str.replace(",", "."), errors="coerce")
-
 
 def format_num_comma(val, decimals=2):
     """Formatta un numero con la virgola per i decimali."""
@@ -39,7 +65,6 @@ def format_num_comma(val, decimals=2):
     except Exception:
         return str(val)
 
-
 def load_clean_df(file_bytes):
     output = io.BytesIO()
     with zipfile.ZipFile(file_bytes, "r") as zin:
@@ -48,18 +73,8 @@ def load_clean_df(file_bytes):
                 buffer = zin.read(item.filename)
                 if "sheet" in item.filename and item.filename.endswith(".xml"):
                     buffer = re.sub(b"<autoFilter[^>]*/>", b"", buffer)
-                    buffer = re.sub(
-                        b"<autoFilter[^>]*>.*?</autoFilter>",
-                        b"",
-                        buffer,
-                        flags=re.DOTALL,
-                    )
-                    buffer = re.sub(
-                        b"<customFilters[^>]*>.*?</customFilters>",
-                        b"",
-                        buffer,
-                        flags=re.DOTALL,
-                    )
+                    buffer = re.sub(b"<autoFilter[^>]*>.*?</autoFilter>", b"", buffer, flags=re.DOTALL)
+                    buffer = re.sub(b"<customFilters[^>]*>.*?</customFilters>", b"", buffer, flags=re.DOTALL)
                     buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
                 zout.writestr(item, buffer)
     output.seek(0)
@@ -73,29 +88,20 @@ def load_clean_df(file_bytes):
 
     for col in df.columns:
         if "DATA" in str(col).upper():
-            df[col] = (
-                pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
-            ).fillna(df[col])
+            df[col] = (pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")).fillna(df[col])
         elif any(k in str(col).upper() for k in ["ORA", "ORARIO"]):
             df[col] = df[col].astype(str).str.replace("00:00:00", "").str.strip()
 
     return df
-
 
 def detect_team_columns(df):
     col_casa, col_ospite = None, None
 
     for c in df.columns:
         c_clean = str(c).upper().strip()
-        if c_clean in [
-            "CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", 
-            "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM"
-        ]:
+        if c_clean in ["CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM"]:
             col_casa = c
-        elif c_clean in [
-            "OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", 
-            "SQUADRA 2", "SQUADRA_2", "TRASFERTA", "SQUADRA A", "AWAY TEAM"
-        ]:
+        elif c_clean in ["OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", "SQUADRA 2", "SQUADRA_2", "TRASFERTA", "SQUADRA A", "AWAY TEAM"]:
             col_ospite = c
 
     if not col_casa or not col_ospite:
@@ -123,7 +129,6 @@ def detect_team_columns(df):
 
     return col_casa, col_ospite
 
-
 def evaluate_market(row, market):
     if pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
         return None
@@ -147,12 +152,10 @@ def evaluate_market(row, market):
         return int(gc != go)
     elif m == "ESITO 1-1":
         return int(gc == 1 and go == 1)
-
     elif m == "GOL":
         return int(gc > 0 and go > 0)
     elif m in ["NO GOL", "NOGOL", "MOGOL"]:
         return int(gc == 0 or go == 0)
-
     elif m in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
     elif m in ["OVER 2,5", "OVER 2.5"]:
@@ -165,7 +168,6 @@ def evaluate_market(row, market):
         return int(gt < 2.5)
     elif m in ["UNDER 3,5", "UNDER 3.5"]:
         return int(gt < 3.5)
-
     elif m == "GOL CASA":
         return int(gc > 0)
     elif m in ["OVER 1,5 CASA", "OVER 1.5 CASA"]:
@@ -176,7 +178,6 @@ def evaluate_market(row, market):
         return int(gc < 1.5)
     elif m in ["UNDER 2,5 CASA", "UNDER 2.5 CASA"]:
         return int(gc < 2.5)
-
     elif m == "GOL OSPITE":
         return int(go > 0)
     elif m in ["OVER 1,5 OSPITE", "OVER 1.5 OSPITE"]:
@@ -189,7 +190,6 @@ def evaluate_market(row, market):
         return int(go < 2.5)
 
     return 0
-
 
 def apply_filters(df, params):
     mask = pd.Series([True] * len(df))
@@ -219,10 +219,8 @@ def apply_filters(df, params):
     )
     return df_filtered
 
-
 def calculate_delays_and_cycles(win_series):
     esiti = win_series.tolist()
-
     ritardi_conclusi = []
     ritardo_corrente = 0
 
@@ -234,18 +232,9 @@ def calculate_delays_and_cycles(win_series):
             ritardo_corrente += 1
 
     ritardo_attuale = ritardo_corrente
-
-    tutti_i_ritardi = (
-        ritardi_conclusi + [ritardo_attuale]
-        if ritardi_conclusi
-        else [ritardo_attuale]
-    )
+    tutti_i_ritardi = ritardi_conclusi + [ritardo_attuale] if ritardi_conclusi else [ritardo_attuale]
     ritardo_max = max(tutti_i_ritardi) if tutti_i_ritardi else 0
-
-    if len(ritardi_conclusi) > 0:
-        ritardo_medio = sum(ritardi_conclusi) / len(ritardi_conclusi)
-    else:
-        ritardo_medio = 0.0
+    ritardo_medio = (sum(ritardi_conclusi) / len(ritardi_conclusi)) if len(ritardi_conclusi) > 0 else 0.0
 
     ciclo_max_storico = 0
     ciclo_consecutivo_corrente = 0
@@ -268,7 +257,6 @@ def calculate_delays_and_cycles(win_series):
         "ciclo_attuale": ciclo_attuale,
     }
 
-
 def get_sorted_strategies(df_base, strategie_dict):
     ranked_strategies = []
     for name, params in strategie_dict.items():
@@ -278,9 +266,7 @@ def get_sorted_strategies(df_base, strategie_dict):
         win_rate_reale = (df_strat_played["WIN"].sum() / tot * 100) if tot > 0 else 0.0
 
         match = re.search(r"(\d+[\.,]?\d*)%", name)
-        win_rate_storico = (
-            float(match.group(1).replace(",", ".")) if match else win_rate_reale
-        )
+        win_rate_storico = float(match.group(1).replace(",", ".")) if match else win_rate_reale
 
         ranked_strategies.append({
             "nome": name,
@@ -291,7 +277,6 @@ def get_sorted_strategies(df_base, strategie_dict):
 
     ranked_strategies.sort(key=lambda x: x["win_rate_reale"], reverse=True)
     return ranked_strategies
-
 
 def get_combination_string(params):
     condizioni = []
@@ -324,35 +309,32 @@ def get_combination_string(params):
 
     return f"🎯 **Mercato Target:** `{mercato}`  \n⚙️ **Combinazione Parametri:** " + "  •  ".join(condizioni)
 
-
 def get_match_key(row, col_casa, col_ospite):
-    """Genera una chiave univoca per ogni partita per associare la quota inserita dall'utente."""
-    nome_casa = str(row.get(col_casa, ""))
-    nome_ospite = str(row.get(col_ospite, ""))
+    """Genera una chiave ID univoca pulita per identificare la partita a prescindere dal filtro attivo."""
+    nome_casa = str(row.get(col_casa, "")).strip().lower()
+    nome_ospite = str(row.get(col_ospite, "")).strip().lower()
     data_match = ""
     for c in row.index:
         if "DATA" in str(c).upper():
-            data_match = str(row[c])
+            data_match = str(row[c]).strip()
             break
     return f"{data_match}_{nome_casa}_{nome_ospite}"
 
 
 def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
-    df_played = (
-        df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
-    )
-    df_future = (
-        df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
-    )
+    df_played = df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
+    df_future = df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
+
+    # Ricarica lo stato da file locale per essere sempre sincronizzati
+    quote_salvate = carica_quote_locali()
 
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
-        st.info("💡 Inserisci la quota per il match e premi **Salva Quota**. Una volta salvata, la quota rimarrà bloccata per il report storico.")
+        st.info("💡 Inserisci la quota, premi **💾 Salva**. La quota rimarrà salvata sul file locale anche dopo la chiusura della dashboard.")
         
         for idx, row in df_future.iterrows():
             m_key = get_match_key(row, col_casa, col_ospite)
-            
             nome_casa = str(row.get(col_casa, 'Casa'))
             nome_ospite = str(row.get(col_ospite, 'Ospite'))
             data_match = ""
@@ -369,8 +351,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
             with c_qlim:
                 st.markdown(f"Quota Limite: **{format_num_comma(quota_limite)}**")
 
-            # Valore di partenza dal salvataggio precedente o di default 1.00
-            val_salvato = st.session_state["saved_odds"].get(m_key, 1.00)
+            val_salvato = quote_salvate.get(m_key, 1.00)
 
             with c_input:
                 q_val = st.number_input(
@@ -385,12 +366,12 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
             with c_btn:
                 st.markdown("<div style='padding-top: 25px;'></div>", unsafe_allow_html=True)
                 if st.button("💾 Salva", key=f"btn_{m_key}"):
-                    st.session_state["saved_odds"][m_key] = q_val
-                    st.toast(f"Quota salvata per {nome_casa} - {nome_ospite}: {format_num_comma(q_val)}")
+                    salva_quota_locale(m_key, q_val)
+                    st.toast(f"Quota {format_num_comma(q_val)} salvata per {nome_casa} - {nome_ospite}!")
                     st.rerun()
 
             with c_res:
-                quota_effettiva = st.session_state["saved_odds"].get(m_key, q_val)
+                quota_effettiva = quote_salvate.get(m_key, q_val)
                 if quota_effettiva > 1.00:
                     if quota_effettiva >= quota_limite:
                         st.success(f"🟢 **VALUE BET!** ({format_num_comma(quota_effettiva)})")
@@ -404,14 +385,13 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        # Aggiungiamo la colonna della Quota Giocata (recuperata dallo stato e BLOCCATA)
-        df_played["QUOTA GIOCATA"] = df_played.apply(
-            lambda r: format_num_comma(st.session_state["saved_odds"].get(get_match_key(r, col_casa, col_ospite), None)),
+        # Recupera in modo fisso dal file locale la quota salvata per i match disputati
+        df_played["QUOTA SALVATA"] = df_played.apply(
+            lambda r: format_num_comma(quote_salvate.get(get_match_key(r, col_casa, col_ospite), None)),
             axis=1
         )
 
         cols_played = []
-
         for c in df_played.columns:
             if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
                 if c not in cols_played:
@@ -422,35 +402,26 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
         if col_ospite and col_ospite in df_played.columns and col_ospite not in cols_played and col_ospite != col_casa:
             cols_played.append(col_ospite)
 
-        # Inseriamo la quota tra le prime colonne leggibili
-        cols_played.append("QUOTA GIOCATA")
+        # Inserisci la quota salvata all'inizio per massima visibilità
+        cols_played.append("QUOTA SALVATA")
 
         altre_cols = [
             c for c in df_played.columns
-            if any(
-                k in str(c).upper()
-                for k in ["GOL CASA", "GOL OSPITE", "SOMMA", "DC", "C1", "C2", "WIN"]
-            ) and c not in cols_played
+            if any(k in str(c).upper() for k in ["GOL CASA", "GOL OSPITE", "SOMMA", "DC", "C1", "C2", "WIN"]) and c not in cols_played
         ]
         cols_played.extend(altre_cols)
 
         df_display = df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
         df_display.index = range(1, len(df_display) + 1)
 
-        # Formattazione senza decimali per Gol Casa, Gol Ospite e Win
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
         for c_int in integer_cols:
             if c_int in df_display.columns:
-                df_display[c_int] = (
-                    pd.to_numeric(df_display[c_int], errors="coerce")
-                    .fillna(0)
-                    .astype(int)
-                )
+                df_display[c_int] = pd.to_numeric(df_display[c_int], errors="coerce").fillna(0).astype(int)
 
-        # Formattazione standard con la virgola per le altre colonne con decimali
         float_cols = [
             c for c in df_display.select_dtypes(include=['float', 'float64']).columns 
-            if c not in integer_cols and c != "QUOTA GIOCATA"
+            if c not in integer_cols and c != "QUOTA SALVATA"
         ]
         for col in float_cols:
             df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
@@ -458,10 +429,12 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
         st.dataframe(df_display, use_container_width=True)
 
 
+# ==========================================
+# APPLICAZIONE PRINCIPALE STREAMLIT
+# ==========================================
 st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
 
 direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
-
 
 @st.cache_data(ttl=300)
 def fetch_data_from_drive(url):
@@ -469,7 +442,6 @@ def fetch_data_from_drive(url):
     if response.status_code == 200:
         return load_clean_df(io.BytesIO(response.content))
     return None
-
 
 try:
     with st.spinner("Lettura dati da Google Drive..."):
@@ -556,9 +528,7 @@ try:
         if "🚨" in modalita:
             st.subheader("🚨 Report Strategie: Sottoperformance & Bounce Back")
 
-            finestra_alert = st.sidebar.slider(
-                "Finestra Media Mobile per Alert", 10, 50, 20, 5
-            )
+            finestra_alert = st.sidebar.slider("Finestra Media Mobile per Alert", 10, 50, 20, 5)
 
             alert_underperforming, alert_bounce_back = [], []
 
@@ -573,9 +543,7 @@ try:
                 tot_strat = len(df_strat_played)
 
                 if tot_strat >= finestra_alert:
-                    df_strat_played["MA"] = (
-                        df_strat_played["WIN"].rolling(window=finestra_alert).mean() * 100
-                    )
+                    df_strat_played["MA"] = (df_strat_played["WIN"].rolling(window=finestra_alert).mean() * 100)
                     ma_series = df_strat_played["MA"].dropna()
                     mm_att = ma_series.iloc[-1]
                     diff_storica = mm_att - win_rate_storico
