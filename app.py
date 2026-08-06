@@ -75,7 +75,7 @@ def invia_telegram(testo):
 def genera_e_invia_report_48h_strategie(
     df_base, strategie_dict, col_casa, col_ospite
 ):
-    """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h con quota limite nativa."""
+    """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h."""
     quote_salvate = carica_quote_locali()
     adesso = datetime.now()
     limite_48h = adesso + timedelta(hours=48)
@@ -164,8 +164,7 @@ def genera_e_invia_report_48h_strategie(
         messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
 
         for idx, row in df_m.iterrows():
-            casa = str(row.get(col_casa, "Casa")).strip()
-            ospite = str(row.get(col_ospite, "Ospite")).strip()
+            casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
             m_key = get_match_key(row, col_casa, col_ospite)
 
             dt_str = (
@@ -227,6 +226,36 @@ def format_num_comma(val, decimals=2):
         return fmt.format(float(val)).replace(".", ",")
     except Exception:
         return str(val)
+
+
+def get_clean_team_names(row, col_casa, col_ospite):
+    """Estrae e pulisce i nomi delle squadre per evitare duplicazioni tipo 'U. Catolica - Cobresal - U. Catolica - Cobresal'."""
+    val_casa = str(row.get(col_casa, "")).strip()
+    val_ospite = str(row.get(col_ospite, "")).strip()
+
+    if col_casa == col_ospite and ("-" in val_casa or "v" in val_casa):
+        parts = re.split(r"\s+[-vV]\s+", val_casa)
+        if len(parts) >= 2:
+            return parts[0].strip(), parts[1].strip()
+
+    if "-" in val_casa and val_casa == val_ospite:
+        parts = val_casa.split("-")
+        if len(parts) >= 2:
+            return parts[0].strip(), parts[1].strip()
+
+    return val_casa or "Casa", val_ospite or "Ospite"
+
+
+def get_match_key(row, col_casa, col_ospite):
+    """Genera una chiave univoca e consistente per identificare la partita."""
+    casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
+    data_match = ""
+    for c in row.index:
+        if "DATA" in str(c).upper():
+            data_match = str(row[c]).strip()
+            break
+    clean_key = f"{data_match}_{casa}_{ospite}".lower()
+    return re.sub(r"\s+", " ", clean_key)
 
 
 def load_clean_df(file_bytes):
@@ -570,17 +599,6 @@ def get_combination_string(params):
     )
 
 
-def get_match_key(row, col_casa, col_ospite):
-    nome_casa = str(row.get(col_casa, "")).strip().lower()
-    nome_ospite = str(row.get(col_ospite, "")).strip().lower()
-    data_match = ""
-    for c in row.index:
-        if "DATA" in str(c).upper():
-            data_match = str(row[c]).strip()
-            break
-    return f"{data_match}_{nome_casa}_{nome_ospite}"
-
-
 def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()]
@@ -599,13 +617,15 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
 
     if len(df_future) > 0:
         st.info(
-            "💡 Inserisci la quota, premi **💾 Salva**. La quota rimarrà salvata sul file locale anche dopo la chiusura della dashboard."
+            "💡 Inserisci la quota, premi **💾 Salva**. Puoi modificarla e risalvarla quante volte vuoi."
         )
 
         for idx, row in df_future.iterrows():
             m_key = get_match_key(row, col_casa, col_ospite)
-            nome_casa = str(row.get(col_casa, "Casa"))
-            nome_ospite = str(row.get(col_ospite, "Ospite"))
+            nome_casa, nome_ospite = get_clean_team_names(
+                row, col_casa, col_ospite
+            )
+
             data_match = ""
             for col_d in df_future.columns:
                 if "DATA" in str(col_d).upper():
@@ -649,18 +669,24 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
                     st.rerun()
 
             with c_res:
-                quota_effettiva = quote_salvate.get(m_key, q_val)
-                if quota_effettiva > 1.00:
-                    if quota_effettiva >= quota_limite:
+                quota_effettiva = quote_salvate.get(m_key, None)
+
+                # Stato Salvataggio (Verifica se modificata rispetto al JSON)
+                if abs(float(q_val) - float(val_salvato)) > 0.001:
+                    st.caption("⚠️ *Modificata (non salvata)*")
+                elif quota_effettiva is not None:
+                    st.caption("✅ *Quota Salvata*")
+                else:
+                    st.caption("⏳ *In attesa*")
+
+                if q_val > 1.00:
+                    if float(q_val) >= quota_limite:
                         st.success(
-                            f"🟢 **VALUE BET!** ({format_num_comma(quota_effettiva)})"
+                            f"🟢 **VALUE BET!** ({format_num_comma(q_val)})"
                         )
                     else:
-                        st.error(
-                            f"🔴 **NO VALUE** ({format_num_comma(quota_effettiva)})"
-                        )
-                else:
-                    st.caption("Non ancora salvata")
+                        st.error(f"🔴 **NO VALUE** ({format_num_comma(q_val)})")
+
             st.divider()
     else:
         st.info("Nessuna prossima partita trovata per questa selezione.")
