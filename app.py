@@ -111,7 +111,10 @@ def clean_team_name(name):
         return ""
     text = str(name).lower().strip()
     text = re.sub(r"[^\w\s]", " ", text)
-    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real", "cf", "fk", "utd", "united", "fc", "ac", "sc", "cd", "as"]
+    stopwords = [
+        "club", "calcio", "spg", "vfb", "1", "de", "la", "real", "cf", "fk", "utd", 
+        "united", "fc", "ac", "sc", "cd", "as", "afc", "bsc", "sv", "vfl", "ffc", "sporting"
+    ]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
@@ -121,9 +124,9 @@ def fuzzy_match_teams(t1, t2):
     c2 = clean_team_name(t2)
     if not c1 or not c2:
         return False
-    if c1 == c2 or c1 in c2 or c2 in c1:
+    if c1 in c2 or c2 in c1:
         return True
-    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.40
+    return difflib.SequenceMatcher(None, c1, c2).ratio() >= 0.35
 
 
 def fetch_all_active_odds(api_key):
@@ -172,7 +175,7 @@ def extract_best_odd(event, market_target):
     for bkm in bookmakers:
         bkm_title = bkm.get("title", "Bookmaker")
         odds_1, odds_x, odds_2 = None, None, None
-        over_25, under_25 = None, None
+        over_15, under_15, over_25, under_25 = None, None, None, None
 
         for market in bkm.get("markets", []):
             key = market.get("key")
@@ -199,13 +202,18 @@ def extract_best_odd(event, market_target):
                             over_25 = price
                         elif name == "Under":
                             under_25 = price
+                    elif point == 1.5:
+                        if name == "Over":
+                            over_15 = price
+                        elif name == "Under":
+                            under_15 = price
 
         current_odd = None
-        if m_target == "1":
+        if m_target in ["1", "CASA"]:
             current_odd = odds_1
-        elif m_target == "X":
+        elif m_target in ["X", "PAREGGIO"]:
             current_odd = odds_x
-        elif m_target == "2":
+        elif m_target in ["2", "OSPITE"]:
             current_odd = odds_2
         elif m_target in ["1X", "1/X"]:
             if odds_1 and odds_x:
@@ -220,6 +228,10 @@ def extract_best_odd(event, market_target):
             current_odd = over_25
         elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
             current_odd = under_25
+        elif "OVER 1.5" in m_target or "OVER 1,5" in m_target:
+            current_odd = over_15
+        elif "UNDER 1.5" in m_target or "UNDER 1,5" in m_target:
+            current_odd = under_15
 
         if current_odd and current_odd > 0:
             if best_price is None or current_odd > best_price:
@@ -374,38 +386,6 @@ def get_sorted_strategies(df_base, strategie_dict):
     return ranked_strategies
 
 
-def get_combination_string(params):
-    condizioni = []
-    mercato = params.get("MERCATO", "N/D")
-
-    mancanti = {
-        "SOMMA": params.get("SOMMA_OP", ">="),
-        "DC": params.get("DC_OP", ">="),
-        "C1": params.get("C1_OP", ">="),
-        "C2": params.get("C2_OP", "<="),
-        "MEDIA CASA": params.get("MEDIA_CASA_OP", ">="),
-        "MEDIA OSPITE": params.get("MEDIA_OSPITE_OP", "<="),
-    }
-
-    for key, default_op in mancanti.items():
-        val = params.get(key)
-        if val is not None:
-            op_key = f"{key}_OP"
-            if key == "MEDIA CASA":
-                op_key = "MEDIA_CASA_OP"
-            elif key == "MEDIA OSPITE":
-                op_key = "MEDIA_OSPITE_OP"
-
-            op = params.get(op_key, default_op)
-            val_str = format_num_comma(val)
-            condizioni.append(f"**{key}** {op} `{val_str}`")
-
-    if not condizioni:
-        return f"🎯 **Mercato Target:** {mercato} | *Nessun filtro sui parametri fisso (Tutti i match)*"
-
-    return f"🎯 **Mercato Target:** `{mercato}`  \n⚙️ **Combinazione Parametri:** " + "  •  ".join(condizioni)
-
-
 def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_casa, col_ospite):
     df_played = df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
     df_future = df_filtered[df_filtered["GOL CASA"].isna()].copy().reset_index(drop=True)
@@ -426,11 +406,11 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
             if q_book:
                 q_book_list.append(format_num_comma(q_book))
                 if q_book > quota_limite:
-                    semaforo_list.append("VALORE")
+                    semaforo_list.append("🟢 VALORE")
                 elif abs(q_book - quota_limite) <= 0.05:
-                    semaforo_list.append("FAIR")
+                    semaforo_list.append("🟡 FAIR")
                 else:
-                    semaforo_list.append("NO VALUE")
+                    semaforo_list.append("🔴 NO VALUE")
             else:
                 q_book_list.append("N/D")
                 semaforo_list.append("N/D")
@@ -464,8 +444,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        q_book_played_list = []
-        bkm_played_list = []
+        q_book_played_list, bkm_played_list = [], []
         for _, row in df_played.iterrows():
             excel_quota = None
             for col_q in df_played.columns:
@@ -570,10 +549,8 @@ try:
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
             [
-                "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
-                "🔥 Cicli Max da Puntare",
             ],
         )
 
