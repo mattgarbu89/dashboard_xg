@@ -52,7 +52,7 @@ if "saved_odds" not in st.session_state:
 
 
 def invia_telegram(testo):
-    """Invia un messaggio formattato in Markdown a Telegram con gestione timeout avanzata."""
+    """Invia un messaggio formattato in Markdown a Telegram con timeout a 20s."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -60,11 +60,9 @@ def invia_telegram(testo):
         "parse_mode": "Markdown",
     }
     try:
-        # Timeout aumentato a 20 secondi per evitare falsi allarmi
         res = requests.post(url, json=payload, timeout=20)
         return res.status_code == 200
     except requests.exceptions.Timeout:
-        # Se va in timeout, il messaggio è quasi certamente stato recapitato comunque
         st.warning(
             "⚠️ La risposta da Telegram ha impiegato più del previsto, ma il report è stato inviato."
         )
@@ -74,106 +72,132 @@ def invia_telegram(testo):
         return False
 
 
-def genera_e_invia_report_24h(df_master, col_casa, col_ospite):
-    """Filtra le partite nelle prossime 24 ore e invia il report Telegram."""
+def genera_e_invia_report_48h_strategie(
+    df_base, strategie_dict, col_casa, col_ospite
+):
+    """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h con quota limite nativa."""
     quote_salvate = carica_quote_locali()
-
-    df_temp = df_master.copy()
-    df_temp["DATETIME_MATCH"] = pd.NaT
-
-    for idx, row in df_temp.iterrows():
-        try:
-            data_col = [c for c in df_temp.columns if "DATA" in str(c).upper()]
-            ora_col = [
-                c
-                for c in df_temp.columns
-                if any(k in str(c).upper() for k in ["ORA", "ORARIO"])
-            ]
-
-            data_str = (
-                str(row[data_col[0]]).split()[0] if data_col else ""
-            )
-            ora_str = (
-                str(row[ora_col[0]]).replace("00:00:00", "").strip()
-                if ora_col
-                else "00:00"
-            )
-
-            if not ora_str or ora_str.lower() == "nan":
-                ora_str = "00:00"
-
-            dt_str = f"{data_str} {ora_str}"
-            df_temp.at[idx, "DATETIME_MATCH"] = pd.to_datetime(
-                dt_str, dayfirst=True, errors="coerce"
-            )
-        except Exception:
-            pass
-
     adesso = datetime.now()
-    limite_24h = adesso + timedelta(hours=24)
+    limite_48h = adesso + timedelta(hours=48)
 
-    col_gol = (
-        "GOL CASA" if "GOL CASA" in df_temp.columns else df_temp.columns[0]
-    )
-    mask = (
-        (df_temp[col_gol].isna())
-        & (df_temp["DATETIME_MATCH"] >= adesso)
-        & (df_temp["DATETIME_MATCH"] <= limite_24h)
-    )
-    df_24h = df_temp[mask].copy().sort_values(by="DATETIME_MATCH")
+    report_strats = {}
+    totale_match_trovati = 0
 
-    if len(df_24h) == 0:
-        invia_telegram(
-            f"📅 *REPORT PROSSIME 24 ORE*\n"
-            f"⏱️ _Finestra:_ `{adesso.strftime('%d/%m %H:%M')}` ➔ `{limite_24h.strftime('%d/%m %H:%M')}`\n\n"
-            f"ℹ️ Nessuna partita in programma nelle prossime 24 ore."
+    for strat_nome, params in strategie_dict.items():
+        df_strat = apply_filters(df_base, params)
+        df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+        tot_match_strat = len(df_played)
+
+        win_rate_reale = (
+            (df_played["WIN"].sum() / tot_match_strat * 100)
+            if tot_match_strat > 0
+            else 0
         )
-        st.info("Report inviato su Telegram: nessuna partita nelle prossime 24h.")
+        quota_limite_strat = (
+            (100 / win_rate_reale) if win_rate_reale > 0 else 0.0
+        )
+
+        df_future = df_strat[df_strat["GOL CASA"].isna()].copy()
+
+        if len(df_future) == 0:
+            continue
+
+        df_future["DATETIME_MATCH"] = pd.NaT
+        data_cols = [c for c in df_future.columns if "DATA" in str(c).upper()]
+        ora_cols = [
+            c
+            for c in df_future.columns
+            if any(k in str(c).upper() for k in ["ORA", "ORARIO"])
+        ]
+
+        for idx, row in df_future.iterrows():
+            try:
+                data_str = (
+                    str(row[data_cols[0]]).split()[0] if data_cols else ""
+                )
+                ora_str = (
+                    str(row[ora_cols[0]]).replace("00:00:00", "").strip()
+                    if ora_cols
+                    else "00:00"
+                )
+                if not ora_str or ora_str.lower() == "nan":
+                    ora_str = "00:00"
+                df_future.at[idx, "DATETIME_MATCH"] = pd.to_datetime(
+                    f"{data_str} {ora_str}", dayfirst=True, errors="coerce"
+                )
+            except Exception:
+                pass
+
+        mask_48h = (df_future["DATETIME_MATCH"] >= adesso) & (
+            df_future["DATETIME_MATCH"] <= limite_48h
+        )
+        df_48h = df_future[mask_48h].copy().sort_values(by="DATETIME_MATCH")
+
+        if len(df_48h) > 0:
+            report_strats[strat_nome] = {
+                "quota_limite": quota_limite_strat,
+                "matches": df_48h,
+            }
+            totale_match_trovati += len(df_48h)
+
+    if totale_match_trovati == 0:
+        invia_telegram(
+            f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
+            f"⏱️ _Finestra:_ `{adesso.strftime('%d/%m %H:%M')}` ➔ `{limite_48h.strftime('%d/%m %H:%M')}`\n\n"
+            f"ℹ️ Nessun match in programma nelle prossime 48 ore per alcuna strategia."
+        )
+        st.info(
+            "Report inviato su Telegram: nessuna partita nelle prossime 48h per le strategie."
+        )
         return
 
-    messaggio = f"📅 *REPORT MATCH PROSSIME 24 ORE*\n"
-    messaggio += f"⏱️ _Da_ `{adesso.strftime('%d/%m %H:%M')}` _a_ `{limite_24h.strftime('%d/%m %H:%M')}`\n\n"
+    messaggio = f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
+    messaggio += f"⏱️ _Da_ `{adesso.strftime('%d/%m %H:%M')}` _a_ `{limite_48h.strftime('%d/%m %H:%M')}`\n"
+    messaggio += f"🎯 *Match totali identificati:* `{totale_match_trovati}`\n"
+    messaggio += "==================================\n\n"
 
-    quota_limite_base = 2.63
+    for strat_nome, data in report_strats.items():
+        q_limite = data["quota_limite"]
+        df_m = data["matches"]
 
-    count = 1
-    for idx, row in df_24h.iterrows():
-        casa = str(row.get(col_casa, "Casa")).strip()
-        ospite = str(row.get(col_ospite, "Ospite")).strip()
-        m_key = get_match_key(row, col_casa, col_ospite)
+        messaggio += f"📌 *STRATEGIA:* `{strat_nome}`\n"
+        messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
 
-        dt_str = (
-            row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M")
-            if pd.notna(row["DATETIME_MATCH"])
-            else "N/D"
-        )
-        quota_inserita = quote_salvate.get(m_key, None)
+        for idx, row in df_m.iterrows():
+            casa = str(row.get(col_casa, "Casa")).strip()
+            ospite = str(row.get(col_ospite, "Ospite")).strip()
+            m_key = get_match_key(row, col_casa, col_ospite)
 
-        messaggio += f"⚽ *{count}. {casa} - {ospite}*\n"
-        messaggio += f"🕐 *Inizio:* `{dt_str}`\n"
-        messaggio += f"⚖️ *Quota Limite:* `{quota_limite_base:.2f}`\n"
+            dt_str = (
+                row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M")
+                if pd.notna(row["DATETIME_MATCH"])
+                else "N/D"
+            )
+            quota_inserita = quote_salvate.get(m_key, None)
 
-        if quota_inserita and float(quota_inserita) > 1.0:
-            q_val = float(quota_inserita)
-            margine = ((q_val - quota_limite_base) / quota_limite_base) * 100
-            messaggio += f"💰 *Quota Inserita:* `{q_val:.2f}`\n"
-            messaggio += f"📊 *Margine Valore:* `{margine:+.1f}%`\n"
+            messaggio += f"⚽ *{casa} - {ospite}*\n"
+            messaggio += f"🕐 *Orario:* `{dt_str}`\n"
 
-            if q_val >= quota_limite_base:
-                messaggio += "STATUS: 🟢 *VALUE BET CONFERMATA*\n"
+            if quota_inserita and float(quota_inserita) > 1.0:
+                q_val = float(quota_inserita)
+                messaggio += (
+                    f"💰 *Quota Trovata:* `{format_num_comma(q_val)}`\n"
+                )
+                if q_val >= q_limite:
+                    messaggio += "STATUS: 🟢 *VALUE BET CONFERMATA*\n"
+                else:
+                    messaggio += "STATUS: 🔴 *NO VALUE*\n"
             else:
-                messaggio += "STATUS: 🔴 *NO VALUE*\n"
-        else:
-            messaggio += "💰 *Quota Inserita:* ⚠️ *NON TROVATA*\n"
-            messaggio += "STATUS: ⏳ *IN ATTESA DI INSERIMENTO*\n"
+                messaggio += "💰 *Quota Trovata:* ⚠️ *NON TROVATA*\n"
+                messaggio += "STATUS: ⏳ *IN ATTESA DI INSERIMENTO*\n"
 
-        messaggio += "----------------------------------\n\n"
-        count += 1
+            messaggio += "----------------------------------\n"
+        messaggio += "\n"
 
     ok = invia_telegram(messaggio)
     if ok:
         st.success(
-            f"✅ Report inviato con successo! Notificati {len(df_24h)} match su Telegram."
+            f"✅ Report inviato con successo! Notificati {totale_match_trovati} match su Telegram."
         )
     else:
         st.error("❌ Impossibile inviare il report su Telegram.")
@@ -910,13 +934,15 @@ try:
             "Colonna Squadra Ospite:", all_cols, index=idx_ospite
         )
 
-        # SEZIONE INTEGRATA TELEGRAM BOT NELLA SIDEBAR
+        # SEZIONE TELEGRAM BOT NELLA SIDEBAR
         st.sidebar.markdown("---")
         st.sidebar.header("📲 NOTIFICHE TELEGRAM")
         if st.sidebar.button(
-            "🚀 Invia Report 24h su Telegram", use_container_width=True
+            "🚀 Invia Report 48h su Telegram", use_container_width=True
         ):
-            genera_e_invia_report_24h(df_base, col_casa, col_ospite)
+            genera_e_invia_report_48h_strategie(
+                df_base, STRATEGIE_SALVATE, col_casa, col_ospite
+            )
 
         # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
