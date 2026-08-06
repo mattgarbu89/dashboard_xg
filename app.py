@@ -21,7 +21,12 @@ LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1
 FILE_QUOTE_LOCALE = "quote_salvate.json"
 
 TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
-TELEGRAM_CHAT_ID = "1192615708"
+
+# LISTA DESTINATARI: Tu in privato + Il canale condiviso
+TELEGRAM_DESTINATARI = [
+    "1192615708",      # Il tuo Chat ID Privato
+    "-1004447605760"    # ID del Canale/Gruppo Telegram
+]
 
 
 # ==========================================
@@ -52,24 +57,29 @@ if "saved_odds" not in st.session_state:
 
 
 def invia_telegram(testo):
-    """Invia un messaggio formattato in Markdown a Telegram con timeout a 20s."""
+    """Invia il messaggio Telegram sia al tuo ID privato sia al canale condiviso."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": testo,
-        "parse_mode": "Markdown",
-    }
-    try:
-        res = requests.post(url, json=payload, timeout=20)
-        return res.status_code == 200
-    except requests.exceptions.Timeout:
-        st.warning(
-            "⚠️ La risposta da Telegram ha impiegato più del previsto, ma il report è stato inviato."
-        )
-        return True
-    except Exception as e:
-        st.error(f"Errore di connessione a Telegram: {e}")
-        return False
+    esito_globale = True
+
+    for chat_id in TELEGRAM_DESTINATARI:
+        payload = {
+            "chat_id": chat_id,
+            "text": testo,
+            "parse_mode": "Markdown",
+        }
+        try:
+            res = requests.post(url, json=payload, timeout=20)
+            if res.status_code != 200:
+                esito_globale = False
+        except requests.exceptions.Timeout:
+            st.warning(
+                f"⚠️ Timeout durante l'invio alla chat {chat_id}, ma il messaggio potrebbe essere arrivato."
+            )
+        except Exception as e:
+            st.error(f"Errore di connessione a Telegram per {chat_id}: {e}")
+            esito_globale = False
+            
+    return esito_globale
 
 
 def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
@@ -173,7 +183,7 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
     ok = invia_telegram(messaggio)
     if ok:
         st.success(
-            f"✅ Report Esiti inviato su Telegram! ({tot_globali} match analizzati)"
+            f"✅ Report Esiti inviato sia a te che nel canale! ({tot_globali} match analizzati)"
         )
 
 
@@ -308,7 +318,7 @@ def genera_e_invia_report_48h_strategie(
     ok = invia_telegram(messaggio)
     if ok:
         st.success(
-            f"✅ Report inviato con successo! Notificati {totale_match_trovati} match su Telegram."
+            f"✅ Report inviato con successo sia a te che nel canale! Notificati {totale_match_trovati} match."
         )
     else:
         st.error("❌ Impossibile inviare il report su Telegram.")
