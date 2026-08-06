@@ -87,7 +87,7 @@ def detect_team_columns(df):
         c_clean = str(c).upper().strip()
         if c_clean in [
             "CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", 
-            "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM"
+            "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM", "PARTITA"
         ]:
             col_casa = c
         elif c_clean in [
@@ -100,24 +100,15 @@ def detect_team_columns(df):
         text_cols = [c for c in df.columns if df[c].dtype == "object" or df[c].dtype == "string"]
         for c in text_cols:
             c_clean = str(c).upper().strip()
-            if not col_casa and "CASA" in c_clean and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI", "QUOTA"]):
+            if not col_casa and ("CASA" in c_clean or "MATCH" in c_clean or "PARTITA" in c_clean) and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI", "QUOTA"]):
                 col_casa = c
             elif not col_ospite and any(x in c_clean for x in ["OSPITE", "TRASFERTA", "AWAY"]) and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI", "QUOTA"]):
                 col_ospite = c
 
-    if not col_casa or not col_ospite:
-        string_cols = []
-        for c in df.columns:
-            sample_val = df[c].dropna().astype(str).head(5).tolist()
-            if sample_val and not any(re.match(r"^-?\d+[\.,]?\d*$", v.strip()) for v in sample_val):
-                if not any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO", "LEGA", "CAMPIONATO"]):
-                    string_cols.append(c)
-        if len(string_cols) >= 2:
-            col_casa = col_casa or string_cols[0]
-            col_ospite = col_ospite or string_cols[1]
-        elif len(string_cols) == 1:
-            col_casa = col_casa or string_cols[0]
-            col_ospite = col_ospite or string_cols[0]
+    if not col_casa:
+        col_casa = df.columns[0]
+    if not col_ospite:
+        col_ospite = df.columns[1] if len(df.columns) > 1 else df.columns[0]
 
     return col_casa, col_ospite
 
@@ -126,8 +117,8 @@ def split_teams_if_combined(val_casa, val_ospite):
     s_casa = str(val_casa).strip() if pd.notna(val_casa) else ""
     s_ospite = str(val_ospite).strip() if pd.notna(val_ospite) else ""
 
-    if s_casa == s_ospite or not s_ospite or s_ospite == "nan":
-        for sep in [" - ", " vs ", " v ", " -"]:
+    if s_casa == s_ospite or not s_ospite or s_ospite == "nan" or s_ospite == "None":
+        for sep in [" - ", " vs ", " v ", " - ", "-", " VS ", " V "]:
             if sep in s_casa:
                 parts = s_casa.split(sep, 1)
                 return parts[0].strip(), parts[1].strip()
@@ -149,12 +140,14 @@ def clean_team_name(name):
         r"\bfc\b": "",
         r"\bsc\b": "",
         r"\bcd\b": "",
+        r"\bas\b": "",
+        r"\binter\b": "inter",
     }
     for pat, repl in replacements.items():
         text = re.sub(pat, repl, text)
 
     text = re.sub(r"[^\w\s]", "", text)
-    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real"]
+    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real", "cf", "fk"]
     words = [w for w in text.split() if w not in stopwords]
     return " ".join(words) if words else text
 
@@ -173,11 +166,11 @@ def fuzzy_match_teams(t1, t2):
             return True
 
     ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.50
+    return ratio >= 0.45
 
 
 def fetch_all_active_odds(api_key):
-    """Scarica le quote attive garantendo la massima stabilità per le chiamate API."""
+    """Scarica le quote attive dai campionati principali."""
     if not api_key:
         return [], "Nessuna API Key fornita"
 
@@ -203,7 +196,6 @@ def fetch_all_active_odds(api_key):
         return [], "Nessun campionato di calcio attivo trovato al momento."
 
     all_odds = []
-    # Usiamo i mercati h2h e totals per evitare l'errore HTTP 400 dell'API
     markets_to_fetch = "h2h,totals"
 
     for key in soccer_keys:
@@ -215,7 +207,7 @@ def fetch_all_active_odds(api_key):
                 if isinstance(data, list) and len(data) > 0:
                     all_odds.extend(data)
             elif res.status_code == 429:
-                req_remaining = "Crediti Esauriti durante il download!"
+                req_remaining = "Crediti Esauriti!"
                 break
         except Exception:
             continue
@@ -227,7 +219,7 @@ def fetch_all_active_odds(api_key):
 
 
 def extract_best_odd(event, market_target):
-    """Scansiona i bookmaker e restituisce la quota più alta e il relativo bookmaker per il mercato specifico."""
+    """Estrae la miglior quota dal singolo evento trovato."""
     m_target = str(market_target).upper().strip().replace(",", ".")
     ev_home = event.get("home_team", "")
     ev_away = event.get("away_team", "")
@@ -244,16 +236,11 @@ def extract_best_odd(event, market_target):
 
         odds_1, odds_x, odds_2 = None, None, None
         over_25, under_25 = None, None
-        exact_11 = None
-        
-        home_under_25, home_under_15 = None, None
-        away_under_25, away_under_15 = None, None
 
         for market in bkm.get("markets", []):
             key = market.get("key")
             outcomes = market.get("outcomes", [])
 
-            # Mercato 1X2
             if key == "h2h":
                 for out in outcomes:
                     price = float(out.get("price", 0))
@@ -262,10 +249,9 @@ def extract_best_odd(event, market_target):
                         odds_1 = price
                     elif name == ev_away or fuzzy_match_teams(name, ev_away):
                         odds_2 = price
-                    elif name in ["Draw", "X"]:
+                    elif name in ["Draw", "X", "Pareggio"]:
                         odds_x = price
 
-            # Mercato Somma Gol Totale
             elif key == "totals":
                 for out in outcomes:
                     price = float(out.get("price", 0))
@@ -276,36 +262,6 @@ def extract_best_odd(event, market_target):
                             over_25 = price
                         elif name == "Under":
                             under_25 = price
-
-            # Mercato Risultato Esatto (Correct Score)
-            elif key == "correct_score":
-                for out in outcomes:
-                    price = float(out.get("price", 0))
-                    name = str(out.get("name", "")).strip()
-                    if name in ["1-1", "1:1", "1 - 1"]:
-                        exact_11 = price
-
-            # Mercato Gol Squadra (Team Totals)
-            elif key in ["team_totals", "home_team_totals", "away_team_totals"]:
-                for out in outcomes:
-                    price = float(out.get("price", 0))
-                    point = float(out.get("point", 0))
-                    name = out.get("name", "")
-                    description = out.get("description", "")
-                    
-                    is_away = ev_away in description or fuzzy_match_teams(description, ev_away)
-                    is_home = ev_home in description or fuzzy_match_teams(description, ev_home)
-
-                    if is_away:
-                        if point == 2.5 and name == "Under":
-                            away_under_25 = price
-                        elif point == 1.5 and name == "Under":
-                            away_under_15 = price
-                    elif is_home:
-                        if point == 2.5 and name == "Under":
-                            home_under_25 = price
-                        elif point == 1.5 and name == "Under":
-                            home_under_15 = price
 
         current_odd = None
         if m_target == "1":
@@ -329,20 +285,10 @@ def extract_best_odd(event, market_target):
                 current_odd = round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
             else:
                 current_odd = odds_1
-        elif "OVER 2.5" in m_target:
+        elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
             current_odd = over_25
-        elif "UNDER 2.5 OSPITE" in m_target:
-            current_odd = away_under_25
-        elif "UNDER 1.5 OSPITE" in m_target:
-            current_odd = away_under_15
-        elif "UNDER 2.5 CASA" in m_target:
-            current_odd = home_under_25
-        elif "UNDER 1.5 CASA" in m_target:
-            current_odd = home_under_15
-        elif "UNDER 2.5" in m_target:
+        elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
             current_odd = under_25
-        elif m_target == "ESITO 1-1":
-            current_odd = exact_11
 
         if current_odd is not None and current_odd > 0:
             if best_price is None or current_odd > best_price:
@@ -353,8 +299,8 @@ def extract_best_odd(event, market_target):
 
 
 def match_odds(home_team, away_team, market_target, odds_data):
-    """Trova il match e restituisce la miglior quota disponibile con il relativo bookmaker."""
-    if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
+    """Trova il match scansionando l'intero dataset scaricato in memoria."""
+    if not odds_data or not home_team or pd.isna(home_team):
         return None, "N/D", "N/D"
 
     h_clean, a_clean = split_teams_if_combined(home_team, away_team)
@@ -363,13 +309,16 @@ def match_odds(home_team, away_team, market_target, odds_data):
         ev_home = event.get("home_team", "")
         ev_away = event.get("away_team", "")
 
-        if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
+        match_home = fuzzy_match_teams(h_clean, ev_home)
+        match_away = fuzzy_match_teams(a_clean, ev_away) if a_clean else True
+
+        if match_home and match_away:
             quota_max, bookmaker = extract_best_odd(event, market_target)
+            match_found = f"{ev_home} vs {ev_away}"
             if quota_max is not None:
-                match_found = f"{ev_home} vs {ev_away}"
                 return quota_max, bookmaker, match_found
             else:
-                return None, "N/D", f"{ev_home} vs {ev_away} (Quota non disponibile)"
+                return None, bookmaker or "N/D", f"{match_found} (No Quota)"
 
     return None, "N/D", "Non Trovata"
 
@@ -397,47 +346,18 @@ def evaluate_market(row, market):
         return int(gc != go)
     elif m == "ESITO 1-1":
         return int(gc == 1 and go == 1)
-
     elif m == "GOL":
         return int(gc > 0 and go > 0)
-    elif m in ["NO GOL", "NOGOL", "MOGOL"]:
+    elif m in ["NO GOL", "NOGOL"]:
         return int(gc == 0 or go == 0)
-
     elif m in ["OVER 1,5", "OVER 1.5"]:
         return int(gt > 1.5)
     elif m in ["OVER 2,5", "OVER 2.5"]:
         return int(gt > 2.5)
-    elif m in ["OVER 3,5", "OVER 3.5"]:
-        return int(gt > 3.5)
     elif m in ["UNDER 1,5", "UNDER 1.5"]:
         return int(gt < 1.5)
     elif m in ["UNDER 2,5", "UNDER 2.5"]:
         return int(gt < 2.5)
-    elif m in ["UNDER 3,5", "UNDER 3.5"]:
-        return int(gt < 3.5)
-
-    elif m == "GOL CASA":
-        return int(gc > 0)
-    elif m in ["OVER 1,5 CASA", "OVER 1.5 CASA"]:
-        return int(gc > 1.5)
-    elif m in ["OVER 2,5 CASA", "OVER 2.5 CASA"]:
-        return int(gc > 2.5)
-    elif m in ["UNDER 1,5 CASA", "UNDER 1.5 CASA"]:
-        return int(gc < 1.5)
-    elif m in ["UNDER 2,5 CASA", "UNDER 2.5 CASA"]:
-        return int(gc < 2.5)
-
-    elif m == "GOL OSPITE":
-        return int(go > 0)
-    elif m in ["OVER 1,5 OSPITE", "OVER 1.5 OSPITE"]:
-        return int(go > 1.5)
-    elif m in ["OVER 2,5 OSPITE", "OVER 2.5 OSPITE"]:
-        return int(go > 2.5)
-    elif m in ["UNDER 1,5 OSPITE", "UNDER 1.5 OSPITE"]:
-        return int(go < 1.5)
-    elif m in ["UNDER 2,5 OSPITE", "UNDER 2.5 OSPITE"]:
-        return int(go < 2.5)
-
     return 0
 
 
@@ -472,7 +392,6 @@ def apply_filters(df, params):
 
 def calculate_delays_and_cycles(win_series):
     esiti = win_series.tolist()
-
     ritardi_conclusi = []
     ritardo_corrente = 0
 
@@ -484,18 +403,9 @@ def calculate_delays_and_cycles(win_series):
             ritardo_corrente += 1
 
     ritardo_attuale = ritardo_corrente
-
-    tutti_i_ritardi = (
-        ritardi_conclusi + [ritardo_attuale]
-        if ritardi_conclusi
-        else [ritardo_attuale]
-    )
+    tutti_i_ritardi = ritardi_conclusi + [ritardo_attuale] if ritardi_conclusi else [ritardo_attuale]
     ritardo_max = max(tutti_i_ritardi) if tutti_i_ritardi else 0
-
-    if len(ritardi_conclusi) > 0:
-        ritardo_medio = sum(ritardi_conclusi) / len(ritardi_conclusi)
-    else:
-        ritardo_medio = 0.0
+    ritardo_medio = (sum(ritardi_conclusi) / len(ritardi_conclusi)) if len(ritardi_conclusi) > 0 else 0.0
 
     ciclo_max_storico = 0
     ciclo_consecutivo_corrente = 0
@@ -508,14 +418,12 @@ def calculate_delays_and_cycles(win_series):
         else:
             ciclo_consecutivo_corrente = 0
 
-    ciclo_attuale = ciclo_consecutivo_corrente
-
     return {
         "ritardo_attuale": ritardo_attuale,
         "ritardo_max": ritardo_max,
         "ritardo_medio": ritardo_medio,
         "ciclo_max_storico": ciclo_max_storico,
-        "ciclo_attuale": ciclo_attuale,
+        "ciclo_attuale": ciclo_consecutivo_corrente,
     }
 
 
@@ -747,12 +655,9 @@ try:
         MERCATI_TOTALI = [
             "1", "X", "2", "1X", "X2", "12",
             "GOL", "NO GOL",
-            "OVER 1,5", "OVER 2,5", "UNDER 1,5", "UNDER 2,5",
-            "GOL CASA", "OVER 1,5 CASA", "OVER 2,5 CASA", "UNDER 1,5 CASA", "UNDER 2,5 CASA",
-            "GOL OSPITE", "OVER 1,5 OSPITE", "OVER 2,5 OSPITE", "UNDER 1,5 OSPITE", "UNDER 2,5 OSPITE"
+            "OVER 1,5", "OVER 2,5", "UNDER 1,5", "UNDER 2,5"
         ]
 
-        # --- SIDEBAR - SELEZIONI IN ALTO ---
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
@@ -774,7 +679,6 @@ try:
             mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
             st.sidebar.markdown("---")
 
-        # --- GESTIONE API CON SALVATAGGIO IN MEMORIA ---
         if "odds_dataset" not in st.session_state:
             st.session_state["odds_dataset"] = []
         if "api_req_remaining" not in st.session_state:
@@ -822,7 +726,6 @@ try:
         col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
         col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
 
-        # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
             st.subheader("🚨 Report Strategie: Sottoperformance & Bounce Back")
 
@@ -893,7 +796,6 @@ try:
                 st.info("Tutte le strategie stabili sopra la media target.")
 
         elif "📊" in modalita:
-            # === MODALITÀ STRATEGIE XG & VALUE BET FINDER ===
             strat_info = strat_map[strat_nome]
             params = strat_info["params"]
             win_rate_storico = strat_info["win_rate_storico"]
@@ -1007,7 +909,6 @@ try:
             render_tables(df_strat, quota_limite, odds_dataset, params["MERCATO"], col_casa, col_ospite)
 
         elif "📂" in modalita:
-            # === MODALITÀ DATABASE TOTALE ===
             st.subheader(f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`")
 
             params_tot = {
@@ -1123,7 +1024,6 @@ try:
             render_tables(df_tot, quota_limite, odds_dataset, mercato_totale_sel, col_casa, col_ospite)
 
         elif "🔥" in modalita:
-            # === MODALITÀ CICLI MAX DA PUNTARE ===
             st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
             st.caption("Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico")
 
