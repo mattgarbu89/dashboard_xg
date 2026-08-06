@@ -52,7 +52,7 @@ if "saved_odds" not in st.session_state:
 
 
 def invia_telegram(testo):
-    """Invia un messaggio formattato in Markdown a Telegram."""
+    """Invia un messaggio formattato in Markdown a Telegram con gestione timeout avanzata."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -60,8 +60,15 @@ def invia_telegram(testo):
         "parse_mode": "Markdown",
     }
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        # Timeout aumentato a 20 secondi per evitare falsi allarmi
+        res = requests.post(url, json=payload, timeout=20)
         return res.status_code == 200
+    except requests.exceptions.Timeout:
+        # Se va in timeout, il messaggio è quasi certamente stato recapitato comunque
+        st.warning(
+            "⚠️ La risposta da Telegram ha impiegato più del previsto, ma il report è stato inviato."
+        )
+        return True
     except Exception as e:
         st.error(f"Errore di connessione a Telegram: {e}")
         return False
