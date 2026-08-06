@@ -72,6 +72,111 @@ def invia_telegram(testo):
         return False
 
 
+def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
+    """Calcola ed invia il resoconto sui match ESITATI con quota salvata da oggi in poi."""
+    quote_salvate = carica_quote_locali()
+
+    if not quote_salvate:
+        st.warning(
+            "⚠️ Nessuna quota salvata trovata nel database locale. Inizia a salvare le quote nelle strategie."
+        )
+        return
+
+    report_strats = {}
+    totale_vinte_globali = 0
+    totale_perse_globali = 0
+    profitto_totale_unita = 0.0
+
+    for strat_nome, params in strategie_dict.items():
+        df_strat = apply_filters(df_base, params)
+
+        # Consideriamo solo i match ESITATI (con risultato presente)
+        df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+
+        vinte_strat = 0
+        perse_strat = 0
+        profitto_strat = 0.0
+
+        for idx, row in df_played.iterrows():
+            m_key, _ = get_match_keys(
+                row, col_casa, col_ospite, params.get("MERCATO", "")
+            )
+
+            # Verifichiamo se per questo match & mercato è stata salvata una quota
+            if m_key in quote_salvate:
+                q_val = float(quote_salvate[m_key])
+                if q_val > 1.0:
+                    is_win = int(row["WIN"]) == 1
+                    if is_win:
+                        vinte_strat += 1
+                        totale_vinte_globali += 1
+                        profitto_strat += q_val - 1.0
+                        profitto_totale_unita += q_val - 1.0
+                    else:
+                        perse_strat += 1
+                        totale_perse_globali += 1
+                        profitto_strat -= 1.0
+                        profitto_totale_unita -= 1.0
+
+        tot_tracciati = vinte_strat + perse_strat
+        if tot_tracciati > 0:
+            wr_tracciato = (vinte_strat / tot_tracciati) * 100
+            report_strats[strat_nome] = {
+                "vinte": vinte_strat,
+                "perse": perse_strat,
+                "totali": tot_tracciati,
+                "wr": wr_tracciato,
+                "profitto": profitto_strat,
+                "wr_storico": (
+                    (df_played["WIN"].sum() / len(df_played) * 100)
+                    if len(df_played) > 0
+                    else 0.0
+                ),
+            }
+
+    tot_globali = totale_vinte_globali + totale_perse_globali
+    if tot_globali == 0:
+        st.info(
+            "ℹ️ Nessun match esitato corrisponde alle quote attualmente salvate."
+        )
+        return
+
+    wr_globale = (totale_vinte_globali / tot_globali) * 100
+    roi_globale = (profitto_totale_unita / tot_globali) * 100
+
+    # Costruzione messaggio Telegram
+    messaggio = "📊 *RESOCONTO MATCH ESITATI (TRACCIATI DA OGGI)*\n"
+    messaggio += (
+        f"📅 _Data Report:_ `{datetime.now().strftime('%d/%m/%Y %H:%M')}`\n\n"
+    )
+
+    messaggio += "📈 *PERFORMANCE GLOBALE:* \n"
+    messaggio += f"⚽ Match Esitati Totali: `{tot_globali}`\n"
+    messaggio += (
+        f"✅ Vinte: `{totale_vinte_globali}` | ❌ Perse: `{totale_perse_globali}`\n"
+    )
+    messaggio += f"🎯 Win Rate Reale: `{format_num_comma(wr_globale)}%`\n"
+    messaggio += f"💰 PnL Netto (1u/bet): `{format_num_comma(profitto_totale_unita, 2)}u`\n"
+    messaggio += f"🚀 ROI Reale: `{format_num_comma(roi_globale, 2)}%`\n"
+    messaggio += "==================================\n\n"
+
+    for strat_nome, data in report_strats.items():
+        messaggio += f"📌 *STRATEGIA:* `{strat_nome}`\n"
+        messaggio += (
+            f"📊 Vinte: `{data['vinte']}` | Perse: `{data['perse']}` (Tot: `{data['totali']}`)\n"
+        )
+        messaggio += f"🎯 Win Rate 'Da Oggi': `{format_num_comma(data['wr'])}%`\n"
+        messaggio += f"🏛️ Win Rate Storico DB: `{format_num_comma(data['wr_storico'])}%`\n"
+        messaggio += f"💵 Profitto Netto: `{format_num_comma(data['profitto'], 2)}u`\n"
+        messaggio += "----------------------------------\n"
+
+    ok = invia_telegram(messaggio)
+    if ok:
+        st.success(
+            f"✅ Report Esiti inviato su Telegram! ({tot_globali} match analizzati)"
+        )
+
+
 def genera_e_invia_report_48h_strategie(
     df_base, strategie_dict, col_casa, col_ospite
 ):
@@ -166,15 +271,16 @@ def genera_e_invia_report_48h_strategie(
 
         for idx, row in df_m.iterrows():
             casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
-            m_key, generic_key = get_match_keys(row, col_casa, col_ospite, m_strat)
+            m_key, generic_key = get_match_keys(
+                row, col_casa, col_ospite, m_strat
+            )
 
             dt_str = (
                 row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M")
                 if pd.notna(row["DATETIME_MATCH"])
                 else "N/D"
             )
-            
-            # Controlla se c'è quota salvata specifica per questo mercato
+
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
 
@@ -192,7 +298,9 @@ def genera_e_invia_report_48h_strategie(
                     messaggio += "STATUS: 🔴 *NO VALUE*\n"
             else:
                 messaggio += "💰 *Quota Trovata:* ⚠️ *NON TROVATA PER QUESTO MERCATO*\n"
-                messaggio += "STATUS: ⏳ *IN ATTESA DI CONFERMA/SALVATAGGIO*\n"
+                messaggio += (
+                    "STATUS: ⏳ *IN ATTESA DI CONFERMA/SALVATAGGIO*\n"
+                )
 
             messaggio += "----------------------------------\n"
         messaggio += "\n"
@@ -250,7 +358,7 @@ def get_clean_team_names(row, col_casa, col_ospite):
 
 
 def get_match_keys(row, col_casa, col_ospite, mercato=""):
-    """Restituisce sia la chiave specifica (Partita + Mercato) che la chiave generica (Solo Partita)."""
+    """Restituisce la chiave specifica (Partita + Mercato) e la chiave generica (Solo Partita)."""
     casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
     data_match = ""
     for c in row.index:
@@ -261,7 +369,7 @@ def get_match_keys(row, col_casa, col_ospite, mercato=""):
     mercato_clean = str(mercato).lower().strip()
     generic_key = f"{data_match}_{casa}_{ospite}".lower()
     generic_key = re.sub(r"\s+", " ", generic_key)
-    
+
     specific_key = f"{generic_key}_{mercato_clean}"
     return specific_key, generic_key
 
@@ -270,16 +378,13 @@ def carica_quota_con_fallback(chiave_specifica, chiave_generica):
     """Cerca la quota per lo specifico mercato; se non c'è, recupera l'ultima inserita per la partita."""
     quote = carica_quote_locali()
 
-    # 1. Quota esatta salvata per questo mercato
     if chiave_specifica in quote:
         return quote[chiave_specifica], True
 
-    # 2. Fallback: cerca qualsiasi altra quota inserita per la stessa partita
     for k, v in quote.items():
         if k.startswith(chiave_generica):
             return v, False
 
-    # 3. Nessuna quota trovata
     return 1.00, False
 
 
@@ -667,7 +772,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                     f"Quota Limite: **{format_num_comma(quota_limite)}**"
                 )
 
-            # Recupero con Fallback intelligente
             val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
 
             with c_input:
@@ -993,6 +1097,13 @@ try:
             "🚀 Invia Report 48h su Telegram", use_container_width=True
         ):
             genera_e_invia_report_48h_strategie(
+                df_base, STRATEGIE_SALVATE, col_casa, col_ospite
+            )
+
+        if st.sidebar.button(
+            "📈 Invia Report Esiti su Telegram", use_container_width=True
+        ):
+            invia_report_esiti_telegram(
                 df_base, STRATEGIE_SALVATE, col_casa, col_ospite
             )
 
