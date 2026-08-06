@@ -13,6 +13,10 @@ st.set_page_config(
 
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
 
+# Inizializzazione dello stato per salvare le quote inserite dall'utente
+if "saved_odds" not in st.session_state:
+    st.session_state["saved_odds"] = {}
+
 
 def get_drive_direct_url(url):
     file_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
@@ -321,6 +325,18 @@ def get_combination_string(params):
     return f"🎯 **Mercato Target:** `{mercato}`  \n⚙️ **Combinazione Parametri:** " + "  •  ".join(condizioni)
 
 
+def get_match_key(row, col_casa, col_ospite):
+    """Genera una chiave univoca per ogni partita per associare la quota inserita dall'utente."""
+    nome_casa = str(row.get(col_casa, ""))
+    nome_ospite = str(row.get(col_ospite, ""))
+    data_match = ""
+    for c in row.index:
+        if "DATA" in str(c).upper():
+            data_match = str(row[c])
+            break
+    return f"{data_match}_{nome_casa}_{nome_ospite}"
+
+
 def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
@@ -332,11 +348,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
-        st.info("💡 Inserisci la quota attuale trovata sul tuo bookmaker per verificare se c'è Value Bet.")
+        st.info("💡 Inserisci la quota per il match e premi **Salva Quota**. Una volta salvata, la quota rimarrà bloccata per il report storico.")
         
-        # Creiamo un ciclo interattivo riga per riga per le prossime partite
         for idx, row in df_future.iterrows():
-            c_info, c_qlim, c_qinput, c_val = st.columns([3, 1.5, 1.5, 2])
+            m_key = get_match_key(row, col_casa, col_ospite)
             
             nome_casa = str(row.get(col_casa, 'Casa'))
             nome_ospite = str(row.get(col_ospite, 'Ospite'))
@@ -346,36 +361,55 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
                     data_match = f" ({row[col_d]})"
                     break
 
+            c_info, c_qlim, c_input, c_btn, c_res = st.columns([3, 1.5, 1.5, 1.2, 2])
+
             with c_info:
                 st.markdown(f"**{nome_casa} - {nome_ospite}**{data_match}")
                 
             with c_qlim:
                 st.markdown(f"Quota Limite: **{format_num_comma(quota_limite)}**")
 
-            with c_qinput:
-                quota_utente = st.number_input(
-                    "Inserisci Quota:",
+            # Valore di partenza dal salvataggio precedente o di default 1.00
+            val_salvato = st.session_state["saved_odds"].get(m_key, 1.00)
+
+            with c_input:
+                q_val = st.number_input(
+                    "Quota Trovata",
                     min_value=1.00,
                     max_value=50.00,
-                    value=1.00,
+                    value=float(val_salvato),
                     step=0.05,
-                    key=f"quota_input_{idx}_{nome_casa}"
+                    key=f"input_{m_key}"
                 )
 
-            with c_val:
-                if quota_utente > 1.00:
-                    if quota_utente >= quota_limite:
-                        st.success(f"🟢 **VALUE BET!** (+{format_num_comma(quota_utente - quota_limite)})")
+            with c_btn:
+                st.markdown("<div style='padding-top: 25px;'></div>", unsafe_allow_html=True)
+                if st.button("💾 Salva", key=f"btn_{m_key}"):
+                    st.session_state["saved_odds"][m_key] = q_val
+                    st.toast(f"Quota salvata per {nome_casa} - {nome_ospite}: {format_num_comma(q_val)}")
+                    st.rerun()
+
+            with c_res:
+                quota_effettiva = st.session_state["saved_odds"].get(m_key, q_val)
+                if quota_effettiva > 1.00:
+                    if quota_effettiva >= quota_limite:
+                        st.success(f"🟢 **VALUE BET!** ({format_num_comma(quota_effettiva)})")
                     else:
-                        st.error(f"🔴 **NO VALUE** ({format_num_comma(quota_utente)})")
+                        st.error(f"🔴 **NO VALUE** ({format_num_comma(quota_effettiva)})")
                 else:
-                    st.caption("Inserisci quota...")
+                    st.caption("Non ancora salvata")
             st.divider()
     else:
         st.info("Nessuna prossima partita trovata per questa selezione.")
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
+        # Aggiungiamo la colonna della Quota Giocata (recuperata dallo stato e BLOCCATA)
+        df_played["QUOTA GIOCATA"] = df_played.apply(
+            lambda r: format_num_comma(st.session_state["saved_odds"].get(get_match_key(r, col_casa, col_ospite), None)),
+            axis=1
+        )
+
         cols_played = []
 
         for c in df_played.columns:
@@ -387,6 +421,9 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
             cols_played.append(col_casa)
         if col_ospite and col_ospite in df_played.columns and col_ospite not in cols_played and col_ospite != col_casa:
             cols_played.append(col_ospite)
+
+        # Inseriamo la quota tra le prime colonne leggibili
+        cols_played.append("QUOTA GIOCATA")
 
         altre_cols = [
             c for c in df_played.columns
@@ -411,7 +448,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
                 )
 
         # Formattazione standard con la virgola per le altre colonne con decimali
-        float_cols = [c for c in df_display.select_dtypes(include=['float', 'float64']).columns if c not in integer_cols]
+        float_cols = [
+            c for c in df_display.select_dtypes(include=['float', 'float64']).columns 
+            if c not in integer_cols and c != "QUOTA GIOCATA"
+        ]
         for col in float_cols:
             df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
 
