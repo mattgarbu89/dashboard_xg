@@ -286,10 +286,12 @@ def extract_best_odd(event, market_target):
                 current_odd = round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
             else:
                 current_odd = odds_1
-        elif "OVER 2.5" in m_target or "OVER 2,5" in m_target:
+        elif "OVER 2.5" in m_target:
             current_odd = over_25
-        elif "UNDER 2.5" in m_target or "UNDER 2,5" in m_target:
+        elif "UNDER 2.5" in m_target:
             current_odd = under_25
+        elif m_target in ["GOL", "GOL CASA", "GOL OSPITE"]:
+            current_odd = odds_1 if odds_1 else over_25
         elif m_target == "ESITO 1-1":
             current_odd = odds_x
 
@@ -303,7 +305,7 @@ def extract_best_odd(event, market_target):
 
 def match_odds(home_team, away_team, market_target, odds_data):
     """Trova il match e restituisce la miglior quota disponibile con il relativo bookmaker."""
-    if not odds_data or not home_team or not away_team or pd.isna(home_team) or pd.isna(away_team):
+    if not odds_data or not home_team or pd.isna(home_team):
         return None, "N/D", "N/D"
 
     h_clean, a_clean = split_teams_if_combined(home_team, away_team)
@@ -312,13 +314,16 @@ def match_odds(home_team, away_team, market_target, odds_data):
         ev_home = event.get("home_team", "")
         ev_away = event.get("away_team", "")
 
-        if fuzzy_match_teams(h_clean, ev_home) and fuzzy_match_teams(a_clean, ev_away):
+        match_h = fuzzy_match_teams(h_clean, ev_home)
+        match_a = fuzzy_match_teams(a_clean, ev_away) if a_clean else True
+
+        if match_h and match_a:
             quota_max, bookmaker = extract_best_odd(event, market_target)
+            match_found = f"{ev_home} vs {ev_away}"
             if quota_max is not None:
-                match_found = f"{ev_home} vs {ev_away}"
                 return quota_max, bookmaker, match_found
             else:
-                return None, "N/D", f"{ev_home} vs {ev_away} (Quota non disponibile)"
+                return None, bookmaker or "N/D", f"{match_found} (Quota non trovata)"
 
     return None, "N/D", "Non Trovata"
 
