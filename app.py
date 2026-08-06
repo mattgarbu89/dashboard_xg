@@ -1,7 +1,6 @@
 import io
 import re
 import zipfile
-import difflib
 import pandas as pd
 import requests
 import streamlit as st
@@ -13,7 +12,6 @@ st.set_page_config(
 )
 
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
-ODDS_API_KEY_DEFAULT = "1eb2407df0cb3fee45c56827ba2610d2"
 
 
 def get_drive_direct_url(url):
@@ -120,212 +118,6 @@ def detect_team_columns(df):
             col_ospite = col_ospite or string_cols[0]
 
     return col_casa, col_ospite
-
-
-def split_teams_if_combined(val_casa, val_ospite):
-    s_casa = str(val_casa).strip() if pd.notna(val_casa) else ""
-    s_ospite = str(val_ospite).strip() if pd.notna(val_ospite) else ""
-
-    if s_casa == s_ospite or not s_ospite or s_ospite == "nan":
-        for sep in [" - ", " vs ", " v ", " -"]:
-            if sep in s_casa:
-                parts = s_casa.split(sep, 1)
-                return parts[0].strip(), parts[1].strip()
-
-    return s_casa, s_ospite
-
-
-def clean_team_name(name):
-    if not name or pd.isna(name):
-        return ""
-    text = str(name).lower().strip()
-    
-    replacements = {
-        r"\butd\b": "united",
-        r"\bu\.\b": "universidad ",
-        r"\bdep\.\b": "deportes ",
-        r"\bst\.\b": "saint ",
-        r"\bac\b": "",
-        r"\bfc\b": "",
-        r"\bsc\b": "",
-        r"\bcd\b": "",
-    }
-    for pat, repl in replacements.items():
-        text = re.sub(pat, repl, text)
-
-    text = re.sub(r"[^\w\s]", "", text)
-    stopwords = ["club", "calcio", "spg", "vfb", "1", "de", "la", "real"]
-    words = [w for w in text.split() if w not in stopwords]
-    return " ".join(words) if words else text
-
-
-def fuzzy_match_teams(t1, t2):
-    c1 = clean_team_name(t1)
-    c2 = clean_team_name(t2)
-    if not c1 or not c2:
-        return False
-
-    if c1 == c2:
-        return True
-
-    if len(c1) >= 3 and len(c2) >= 3:
-        if c1 in c2 or c2 in c1:
-            return True
-
-    ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
-    return ratio >= 0.50
-
-
-def fetch_all_active_odds(api_key):
-    if not api_key:
-        return [], "Nessuna API Key fornita"
-
-    sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
-    req_remaining = "N/D"
-    try:
-        res_sports = requests.get(sports_url, timeout=10)
-        if res_sports.status_code == 401:
-            return [], "API Key non valida!"
-        elif res_sports.status_code == 429:
-            return [], "Crediti API esauriti!"
-        elif res_sports.status_code != 200:
-            return [], f"Errore server API: {res_sports.status_code}"
-
-        req_remaining = res_sports.headers.get("x-requests-remaining", "N/D")
-
-        all_sports = res_sports.json()
-        soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
-    except Exception:
-        soccer_keys = [
-            "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
-            "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
-            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league"
-        ]
-
-    all_odds = []
-    for key in soccer_keys:
-        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu,uk&markets=h2h,totals&oddsFormat=decimal"
-        try:
-            res = requests.get(url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                if isinstance(data, list):
-                    all_odds.extend(data)
-            elif res.status_code == 429:
-                break
-        except Exception:
-            continue
-
-    return all_odds, req_remaining
-
-
-def extract_best_odd(event, market_target):
-    """Scansiona TUTTI i bookmaker dell'evento e restituisce la quota più alta e il nome del bookmaker."""
-    m_target = str(market_target).upper().strip().replace(",", ".")
-    ev_home = event.get("home_team", "")
-    ev_away = event.get("away_team", "")
-
-    bookmakers = event.get("bookmakers", [])
-    if not bookmakers:
-        return None, None
-
-    best_price = None
-    best_bookmaker = None
-
-    for bkm in bookmakers:
-        bkm_title = bkm.get("title", bkm.get("key", "Sconosciuto"))
-        
-        odds_1, odds_x, odds_2 = None, None, None
-        over_25, under_25 = None, None
-
-        for market in bkm.get("markets", []):
-            key = market.get("key")
-            outcomes = market.get("outcomes", [])
-
-            if key == "h2h":
-                for out in outcomes:
-                    price = float(out.get("price", 0))
-                    name = out.get("name", "")
-                    if name == ev_home or fuzzy_match_teams(name, ev_home):
-                        odds_1 = price
-                    elif name == ev_away or fuzzy_match_teams(name, ev_away):
-                        odds_2 = price
-                    elif name in ["Draw", "X"]:
-                        odds_x = price
-
-            elif key == "totals":
-                for out in outcomes:
-                    price = float(out.get("price", 0))
-                    point = float(out.get("point", 0))
-                    name = out.get("name", "")
-                    if point == 2.5:
-                        if name == "Over":
-                            over_25 = price
-                        elif name == "Under":
-                            under_25 = price
-
-        current_odd = None
-        if m_target == "1":
-            current_odd = odds_1
-        elif m_target == "X":
-            current_odd = odds_x
-        elif m_target == "2":
-            current_odd = odds_2
-        elif m_target in ["1X", "1/X"]:
-            if odds_1 and odds_x:
-                current_odd = round(1 / ((1 / odds_1) + (1 / odds_x)), 2)
-            else:
-                current_odd = odds_1
-        elif m_target in ["X2", "X/2"]:
-            if odds_2 and odds_x:
-                current_odd = round(1 / ((1 / odds_2) + (1 / odds_x)), 2)
-            else:
-                current_odd = odds_2
-        elif m_target in ["12", "1/2"]:
-            if odds_1 and odds_2:
-                current_odd = round(1 / ((1 / odds_1) + (1 / odds_2)), 2)
-            else:
-                current_odd = odds_1
-        elif "OVER 2.5" in m_target:
-            current_odd = over_25
-        elif "UNDER 2.5" in m_target:
-            current_odd = under_25
-        elif m_target in ["GOL", "GOL CASA", "GOL OSPITE"]:
-            current_odd = odds_1 if odds_1 else over_25
-        elif m_target == "ESITO 1-1":
-            current_odd = odds_x
-
-        if current_odd is not None and current_odd > 0:
-            if best_price is None or current_odd > best_price:
-                best_price = current_odd
-                best_bookmaker = bkm_title
-
-    return best_price, best_bookmaker
-
-
-def match_odds(home_team, away_team, market_target, odds_data):
-    """Trova il match e restituisce la miglior quota disponibile con il relativo bookmaker."""
-    if not odds_data or not home_team or pd.isna(home_team):
-        return None, "N/D", "N/D"
-
-    h_clean, a_clean = split_teams_if_combined(home_team, away_team)
-
-    for event in odds_data:
-        ev_home = event.get("home_team", "")
-        ev_away = event.get("away_team", "")
-
-        match_h = fuzzy_match_teams(h_clean, ev_home)
-        match_a = fuzzy_match_teams(a_clean, ev_away) if a_clean else True
-
-        if match_h and match_a:
-            quota_max, bookmaker = extract_best_odd(event, market_target)
-            match_found = f"{ev_home} vs {ev_away}"
-            if quota_max is not None:
-                return quota_max, bookmaker, match_found
-            else:
-                return None, bookmaker or "N/D", f"{match_found} (Quota non trovata)"
-
-    return None, "N/D", "Non Trovata"
 
 
 def evaluate_market(row, market):
@@ -529,7 +321,7 @@ def get_combination_string(params):
     return f"🎯 **Mercato Target:** `{mercato}`  \n⚙️ **Combinazione Parametri:** " + "  •  ".join(condizioni)
 
 
-def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_casa, col_ospite):
+def render_tables(df_filtered, quota_limite, col_casa, col_ospite):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()].copy().reset_index(drop=True)
     )
@@ -540,33 +332,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
     st.subheader(f"⏳ Prossime Partite da Giocare ({len(df_future)})")
 
     if len(df_future) > 0:
-        q_book_list, bkm_list, semaforo_list, match_api_list = [], [], [], []
-
-        for _, row in df_future.iterrows():
-            val_casa = row.get(col_casa) if col_casa else None
-            val_ospite = row.get(col_ospite) if col_ospite else None
-
-            q_book, bookmaker, match_name_api = match_odds(val_casa, val_ospite, market_target, odds_dataset)
-            match_api_list.append(match_name_api)
-            bkm_list.append(bookmaker)
-
-            if q_book:
-                q_book_list.append(format_num_comma(q_book))
-                if q_book > quota_limite:
-                    semaforo_list.append("VALORE")
-                elif abs(q_book - quota_limite) <= 0.05:
-                    semaforo_list.append("FAIR")
-                else:
-                    semaforo_list.append("NO VALUE")
-            else:
-                q_book_list.append("N/D")
-                semaforo_list.append("N/D")
-
-        df_future["Match Trovato su API"] = match_api_list
         df_future["Quota Limite"] = format_num_comma(quota_limite)
-        df_future["Miglior Quota"] = q_book_list
-        df_future["Bookmaker"] = bkm_list
-        df_future["Valutazione Value Bet"] = semaforo_list
 
         cols_finali = []
         for c in df_future.columns:
@@ -579,7 +345,7 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         if col_ospite and col_ospite in df_future.columns and col_ospite not in cols_finali and col_ospite != col_casa:
             cols_finali.append(col_ospite)
 
-        cols_finali.extend(["Match Trovato su API", "Quota Limite", "Miglior Quota", "Bookmaker", "Valutazione Value Bet"])
+        cols_finali.append("Quota Limite")
         cols_finali_clean = [c for c in cols_finali if c in df_future.columns]
 
         df_future_display = df_future[cols_finali_clean].copy()
@@ -591,28 +357,6 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
 
     st.subheader(f"📋 Ultime Partite Processate ({len(df_played)})")
     if len(df_played) > 0:
-        q_book_played_list = []
-        bkm_played_list = []
-        for _, row in df_played.iterrows():
-            excel_quota = None
-            for col_q in df_played.columns:
-                if "QUOTA" in str(col_q).upper():
-                    excel_quota = row.get(col_q)
-                    break
-
-            if pd.notna(excel_quota) and str(excel_quota).strip() not in ["", "nan", "None"]:
-                q_book_played_list.append(format_num_comma(excel_quota))
-                bkm_played_list.append("Excel")
-            else:
-                val_casa = row.get(col_casa) if col_casa else None
-                val_ospite = row.get(col_ospite) if col_ospite else None
-                q_book, bkm, _ = match_odds(val_casa, val_ospite, market_target, odds_dataset)
-                q_book_played_list.append(format_num_comma(q_book) if q_book else "N/D")
-                bkm_played_list.append(bkm if bkm else "N/D")
-
-        df_played["Miglior Quota"] = q_book_played_list
-        df_played["Bookmaker"] = bkm_played_list
-
         cols_played = []
 
         for c in df_played.columns:
@@ -634,15 +378,22 @@ def render_tables(df_filtered, quota_limite, odds_dataset, market_target, col_ca
         ]
         cols_played.extend(altre_cols)
 
-        if "Miglior Quota" in df_played.columns and "Miglior Quota" not in cols_played:
-            cols_played.append("Miglior Quota")
-        if "Bookmaker" in df_played.columns and "Bookmaker" not in cols_played:
-            cols_played.append("Bookmaker")
-
         df_display = df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
         df_display.index = range(1, len(df_display) + 1)
 
-        for col in df_display.select_dtypes(include=['float', 'float64']).columns:
+        # Formattazione senza decimali per Gol Casa, Gol Ospite e Win
+        integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
+        for c_int in integer_cols:
+            if c_int in df_display.columns:
+                df_display[c_int] = (
+                    pd.to_numeric(df_display[c_int], errors="coerce")
+                    .fillna(0)
+                    .astype(int)
+                )
+
+        # Formattazione standard con la virgola per le altre colonne con decimali
+        float_cols = [c for c in df_display.select_dtypes(include=['float', 'float64']).columns if c not in integer_cols]
+        for col in float_cols:
             df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
 
         st.dataframe(df_display, use_container_width=True)
@@ -727,40 +478,6 @@ try:
             st.sidebar.header("🎯 SELEZIONA MERCATO TOTALE")
             mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
             st.sidebar.markdown("---")
-
-        # --- GESTIONE API CON SALVATAGGIO IN MEMORIA ---
-        if "odds_dataset" not in st.session_state:
-            st.session_state["odds_dataset"] = []
-        if "api_req_remaining" not in st.session_state:
-            st.session_state["api_req_remaining"] = "N/D"
-
-        st.sidebar.header("🔑 Configurazione Odds API")
-        api_key = st.sidebar.text_input(
-            "API Key:",
-            value=ODDS_API_KEY_DEFAULT,
-            type="password",
-        )
-
-        if st.sidebar.button("📥 Scarica / Aggiorna Quote ora"):
-            if api_key:
-                with st.sidebar.spinner("Download quote in corso..."):
-                    data_odds, req_rem = fetch_all_active_odds(api_key)
-                    st.session_state["odds_dataset"] = data_odds
-                    st.session_state["api_req_remaining"] = req_rem
-                    
-                    if len(data_odds) > 0:
-                        st.sidebar.success(f"✅ Scaricate {len(data_odds)} quote!")
-                    else:
-                        st.sidebar.warning(f"⚠️ {req_rem}")
-            else:
-                st.sidebar.error("Inserisci prima una API Key valida.")
-
-        odds_dataset = st.session_state["odds_dataset"]
-
-        if len(odds_dataset) > 0:
-            st.sidebar.info(f"📊 Quote attive in memoria: {len(odds_dataset)}\n\nCrediti Rimanenti: {st.session_state['api_req_remaining']}")
-        else:
-            st.sidebar.caption("🔴 API disconnessa (0 quote in memoria). Premere il tasto sopra per scaricarle.")
 
         if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
             st.cache_data.clear()
@@ -958,7 +675,7 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(df_strat, quota_limite, odds_dataset, params["MERCATO"], col_casa, col_ospite)
+            render_tables(df_strat, quota_limite, col_casa, col_ospite)
 
         elif "📂" in modalita:
             # === MODALITÀ DATABASE TOTALE ===
@@ -1074,7 +791,7 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(df_tot, quota_limite, odds_dataset, mercato_totale_sel, col_casa, col_ospite)
+            render_tables(df_tot, quota_limite, col_casa, col_ospite)
 
         elif "🔥" in modalita:
             # === MODALITÀ CICLI MAX DA PUNTARE ===
