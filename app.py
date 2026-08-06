@@ -1167,7 +1167,6 @@ try:
                                 era_in_minimo = (
                                     "🔥 RIMBALZO DA MINIMO STORICO"
                                     if mm_prev <= (mm_min_storica + 3.0)
-                                    recupero_val = mm_att - mm_prev
                                     else "📈 RIENTRO IN TREND"
                                 )
 
