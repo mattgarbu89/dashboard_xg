@@ -177,11 +177,13 @@ def fuzzy_match_teams(t1, t2):
 
 
 def fetch_all_active_odds(api_key):
+    """Scarica le quote attive garantendo la massima stabilità per le chiamate API."""
     if not api_key:
         return [], "Nessuna API Key fornita"
 
     sports_url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}"
     req_remaining = "N/D"
+
     try:
         res_sports = requests.get(sports_url, timeout=10)
         if res_sports.status_code == 401:
@@ -192,30 +194,34 @@ def fetch_all_active_odds(api_key):
             return [], f"Errore server API: {res_sports.status_code}"
 
         req_remaining = res_sports.headers.get("x-requests-remaining", "N/D")
-
         all_sports = res_sports.json()
         soccer_keys = [s["key"] for s in all_sports if s.get("group") == "Soccer" and s.get("active")]
-    except Exception:
-        soccer_keys = [
-            "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
-            "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one",
-            "soccer_netherlands_eredivisie", "soccer_belgium_first_div", "soccer_uefa_champs_league"
-        ]
+    except Exception as e:
+        return [], f"Errore di connessione: {e}"
+
+    if not soccer_keys:
+        return [], "Nessun campionato di calcio attivo trovato al momento."
 
     all_odds = []
-    # Includiamo i mercati estesi (h2h, totals, correct_score, team_totals)
+    # Usiamo i mercati h2h e totals per evitare l'errore HTTP 400 dell'API
+    markets_to_fetch = "h2h,totals"
+
     for key in soccer_keys:
-        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu,uk&markets=h2h,totals,correct_score,team_totals&oddsFormat=decimal"
+        url = f"https://api.the-odds-api.com/v4/sports/{key}/odds/?apiKey={api_key}&regions=eu&markets={markets_to_fetch}&oddsFormat=decimal"
         try:
-            res = requests.get(url, timeout=5)
+            res = requests.get(url, timeout=8)
             if res.status_code == 200:
                 data = res.json()
-                if isinstance(data, list):
+                if isinstance(data, list) and len(data) > 0:
                     all_odds.extend(data)
             elif res.status_code == 429:
+                req_remaining = "Crediti Esauriti durante il download!"
                 break
         except Exception:
             continue
+
+    if len(all_odds) == 0:
+        return [], f"Nessun evento quotato trovato nei campionati attivi (Crediti: {req_remaining})"
 
     return all_odds, req_remaining
 
@@ -287,7 +293,6 @@ def extract_best_odd(event, market_target):
                     name = out.get("name", "")
                     description = out.get("description", "")
                     
-                    # Identifica se si riferisce a Casa o Ospite
                     is_away = ev_away in description or fuzzy_match_teams(description, ev_away)
                     is_home = ev_home in description or fuzzy_match_teams(description, ev_home)
 
