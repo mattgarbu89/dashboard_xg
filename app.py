@@ -56,29 +56,74 @@ if "saved_odds" not in st.session_state:
     st.session_state["saved_odds"] = carica_quote_locali()
 
 
-def invia_telegram(testo):
-    """Invia il messaggio Telegram sia al tuo ID privato sia al canale condiviso."""
+def escape_markdown(text):
+    """Pulisce il testo dai caratteri speciali che possono causare errori nel Markdown di Telegram."""
+    if not isinstance(text, str):
+        text = str(text)
+    # Rimuove i caratteri che rompono la formattazione
+    return re.sub(r'[*_`\[\]]', '', text)
+
+
+def invia_singolo_messaggio_telegram(chat_id, testo):
+    """Invia un singolo blocco di testo tramite Telegram API."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": testo,
+        "parse_mode": "Markdown",
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=20)
+        if res.status_code == 200:
+            return True, "OK"
+        else:
+            return False, f"HTTP {res.status_code}: {res.text}"
+    except Exception as e:
+        return False, str(e)
+
+
+def invia_telegram(testo):
+    """Divide i messaggi se troppo lunghi (>3500 char) e li invia a tutti i destinatari."""
+    # Splitta il testo in blocchi per evitare il limite di 4096 caratteri di Telegram
+    MAX_CHAR = 3500
+    blocchi = []
+    
+    if len(testo) <= MAX_CHAR:
+        blocchi.append(testo)
+    else:
+        righe = testo.split("\n")
+        blocco_corrente = ""
+        for riga in righe:
+            if len(blocco_corrente) + len(riga) + 1 > MAX_CHAR:
+                blocchi.append(blocco_corrente)
+                blocco_corrente = riga + "\n"
+            else:
+                blocco_corrente += riga + "\n"
+        if blocco_corrente:
+            blocchi.append(blocco_corrente)
+
     esito_globale = True
+    dettagli_errori = []
 
     for chat_id in TELEGRAM_DESTINATARI:
-        payload = {
-            "chat_id": chat_id,
-            "text": testo,
-            "parse_mode": "Markdown",
-        }
-        try:
-            res = requests.post(url, json=payload, timeout=20)
-            if res.status_code != 200:
-                esito_globale = False
-        except requests.exceptions.Timeout:
-            st.warning(
-                f"⚠️ Timeout durante l'invio alla chat {chat_id}, ma il messaggio potrebbe essere arrivato."
-            )
-        except Exception as e:
-            st.error(f"Errore di connessione a Telegram per {chat_id}: {e}")
-            esito_globale = False
-            
+        for i, blocco in enumerate(blocchi):
+            ok, err_msg = invia_singolo_messaggio_telegram(chat_id, blocco)
+            if not ok:
+                # Prova fallback senza Markdown se c'è un errore di formattazione
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {"chat_id": chat_id, "text": blocco}
+                try:
+                    res_fb = requests.post(url, json=payload, timeout=20)
+                    if res_fb.status_code != 200:
+                        esito_globale = False
+                        dettagli_errori.append(f"Chat {chat_id}: {err_msg}")
+                except Exception as e_fb:
+                    esito_globale = False
+                    dettagli_errori.append(f"Chat {chat_id}: {str(e_fb)}")
+
+    if not esito_globale and dettagli_errori:
+        st.error(f"⚠️ Errore Telegram dettagliato: {', '.join(set(dettagli_errori))}")
+
     return esito_globale
 
 
@@ -99,8 +144,6 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
 
     for strat_nome, params in strategie_dict.items():
         df_strat = apply_filters(df_base, params)
-
-        # Consideriamo solo i match ESITATI (con risultato presente)
         df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
 
         vinte_strat = 0
@@ -112,7 +155,6 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
                 row, col_casa, col_ospite, params.get("MERCATO", "")
             )
 
-            # Verifichiamo se per questo match & mercato è stata salvata una quota
             if m_key in quote_salvate:
                 q_val = float(quote_salvate[m_key])
                 if q_val > 1.0:
@@ -154,7 +196,6 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
     wr_globale = (totale_vinte_globali / tot_globali) * 100
     roi_globale = (profitto_totale_unita / tot_globali) * 100
 
-    # Costruzione messaggio Telegram
     messaggio = "📊 *RESOCONTO MATCH ESITATI (TRACCIATI DA OGGI)*\n"
     messaggio += (
         f"📅 _Data Report:_ `{datetime.now().strftime('%d/%m/%Y %H:%M')}`\n\n"
@@ -171,7 +212,8 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
     messaggio += "==================================\n\n"
 
     for strat_nome, data in report_strats.items():
-        messaggio += f"📌 *STRATEGIA:* `{strat_nome}`\n"
+        s_clean = escape_markdown(strat_nome)
+        messaggio += f"📌 *STRATEGIA:* `{s_clean}`\n"
         messaggio += (
             f"📊 Vinte: `{data['vinte']}` | Perse: `{data['perse']}` (Tot: `{data['totali']}`)\n"
         )
@@ -237,7 +279,6 @@ def genera_e_invia_report_48h_strategie(
                 if not ora_str or ora_str.lower() == "nan":
                     ora_str = "00:00"
                 
-                # Conversione data flessibile (supporta sia DD/MM/YYYY che YYYY-MM-DD)
                 dt_obj = pd.to_datetime(f"{data_str} {ora_str}", dayfirst=True, errors="coerce")
                 if pd.isna(dt_obj):
                     dt_obj = pd.to_datetime(f"{data_str} {ora_str}", errors="coerce")
@@ -259,7 +300,6 @@ def genera_e_invia_report_48h_strategie(
             }
             totale_match_trovati += len(df_48h)
 
-    # Caso in cui non ci sono match nelle prossime 48h
     if totale_match_trovati == 0:
         msg_empty = (
             f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
@@ -269,8 +309,6 @@ def genera_e_invia_report_48h_strategie(
         ok = invia_telegram(msg_empty)
         if ok:
             st.info("ℹ️ Report inviato su Telegram: nessuna partita programmata nelle prossime 48h.")
-        else:
-            st.error("❌ Nessun match trovato e errore durante l'invio della notifica su Telegram.")
         return
 
     messaggio = f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
@@ -283,11 +321,15 @@ def genera_e_invia_report_48h_strategie(
         df_m = data["matches"]
         m_strat = data["mercato"]
 
-        messaggio += f"📌 *STRATEGIA:* `{strat_nome}`\n"
+        s_clean = escape_markdown(strat_nome)
+        messaggio += f"📌 *STRATEGIA:* `{s_clean}`\n"
         messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
 
         for idx, row in df_m.iterrows():
             casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
+            casa_clean = escape_markdown(casa)
+            ospite_clean = escape_markdown(ospite)
+
             m_key, generic_key = get_match_keys(
                 row, col_casa, col_ospite, m_strat
             )
@@ -301,7 +343,7 @@ def genera_e_invia_report_48h_strategie(
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
 
-            messaggio += f"⚽ *{casa} - {ospite}*\n"
+            messaggio += f"⚽ *{casa_clean} - {ospite_clean}*\n"
             messaggio += f"🕐 *Orario:* `{dt_str}`\n"
 
             if quota_inserita and float(quota_inserita) > 1.0:
@@ -327,8 +369,6 @@ def genera_e_invia_report_48h_strategie(
         st.success(
             f"✅ Report inviato con successo sia a te che nel canale! Notificati {totale_match_trovati} match."
         )
-    else:
-        st.error("❌ Impossibile inviare il report su Telegram.")
 
 
 # ==========================================
@@ -358,30 +398,25 @@ def format_num_comma(val, decimals=2):
 
 
 def get_clean_team_names(row, col_casa, col_ospite):
-    """Estrae e separa in modo pulito i nomi delle due squadre evitando ripetizioni."""
     val_casa = str(row.get(col_casa, "")).strip()
     val_ospite = str(row.get(col_ospite, "")).strip()
 
     regex_separatori = r"\s+(?:vs|v|-)\s+"
 
-    # Caso 1: La colonna casa contiene già l'intera stringa (es. "Göteborg vs Kalmar")
     if re.search(regex_separatori, val_casa, re.IGNORECASE):
         parts = re.split(regex_separatori, val_casa, flags=re.IGNORECASE)
         if len(parts) >= 2:
             return parts[0].strip(), parts[1].strip()
 
-    # Caso 2: La colonna ospite contiene l'intera stringa
     if re.search(regex_separatori, val_ospite, re.IGNORECASE):
         parts = re.split(regex_separatori, val_ospite, flags=re.IGNORECASE)
         if len(parts) >= 2:
             return parts[0].strip(), parts[1].strip()
 
-    # Caso 3: Le colonne sono distinte e separate normalmente
     return val_casa or "Casa", val_ospite or "Ospite"
 
 
 def get_match_keys(row, col_casa, col_ospite, mercato=""):
-    """Restituisce la chiave specifica (Partita + Mercato) e la chiave generica (Solo Partita)."""
     casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
     data_match = ""
     for c in row.index:
@@ -398,7 +433,6 @@ def get_match_keys(row, col_casa, col_ospite, mercato=""):
 
 
 def carica_quota_con_fallback(chiave_specifica, chiave_generica):
-    """Cerca la quota per lo specifico mercato; se non c'è, recupera l'ultima inserita per la partita."""
     quote = carica_quote_locali()
 
     if chiave_specifica in quote:
@@ -1162,7 +1196,6 @@ try:
                         distanza_da_minimo = mm_att - mm_min_storica
                         last_win = df_played["WIN"].iloc[-1]
 
-                        # Condizione 1: SOTTOPERFORMANCE (La MM Attuale è sotto la Media Storica)
                         if mm_att < wr_target:
                             in_zona_minimo = (
                                 "🔴 SI (AL MINIMO STORICO)"
@@ -1183,8 +1216,6 @@ try:
                                 "Filtri / Dettagli": dettagli_str,
                             })
 
-                            # Condizione 2: RIMBALZO/INVERSIONE DI TREND DALLA ZONA DI MINIMO
-                            # Se l'ultimo match è WIN e la Media Mobile è salita (Inizio Trend Rialzista)
                             if last_win == 1 and mm_att > mm_prev:
                                 rimbalzo_val = mm_att - mm_prev
                                 era_in_minimo = (
@@ -1206,7 +1237,6 @@ try:
                                     "Filtri / Dettagli": dettagli_str,
                                 })
 
-            # 1. Scansione Strategie Salvate
             for item in ranked_strategies:
                 name = item["nome"]
                 wr_storico = item["win_rate_storico"]
@@ -1223,7 +1253,6 @@ try:
                     get_combination_string(params),
                 )
 
-            # 2. Scansione Mercati Database Totale
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1250,7 +1279,6 @@ try:
                     "Database Totale (Senza filtri extra)",
                 )
 
-            # --- RENDER TABELLE RISULTATI ---
             st.markdown(
                 "### 🚀 SEGNALI DI INVERSIONE TREND (Punto di Inizio Investimento)"
             )
