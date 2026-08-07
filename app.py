@@ -413,8 +413,8 @@ def carica_quota_con_fallback(chiave_specifica, chiave_generica):
     return 1.00, False
 
 
-def load_clean_df_from_drive(file_bytes):
-    """Estrae ed analizza esclusivamente il foglio INCROCI GEMINI dal file di Google Drive."""
+def load_clean_df_from_drive(file_bytes, sheet_name="INCROCI GEMINI"):
+    """Estrae ed analizza lo specifico foglio dal file di Google Drive."""
     output = io.BytesIO()
     with zipfile.ZipFile(file_bytes, "r") as zin:
         with zipfile.ZipFile(output, "w") as zout:
@@ -428,7 +428,13 @@ def load_clean_df_from_drive(file_bytes):
                 zout.writestr(item, buffer)
     output.seek(0)
 
-    df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
+    try:
+        df = pd.read_excel(output, sheet_name=sheet_name, engine="openpyxl")
+    except Exception:
+        # Fallback al primo foglio se il nome del foglio non corrisponde
+        excel_file = pd.ExcelFile(output, engine="openpyxl")
+        sheet_target = sheet_name if sheet_name in excel_file.sheet_names else excel_file.sheet_names[0]
+        df = pd.read_excel(excel_file, sheet_name=sheet_target)
 
     cols_to_clean = [
         "SOMMA",
@@ -901,16 +907,28 @@ direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
 @st.cache_data(ttl=300)
-def fetch_data_from_drive(url):
+def fetch_data_from_drive(url, sheet_name="INCROCI GEMINI"):
     response = requests.get(url)
     if response.status_code == 200:
-        return load_clean_df_from_drive(io.BytesIO(response.content))
+        return load_clean_df_from_drive(io.BytesIO(response.content), sheet_name=sheet_name)
     return None
 
 
+# --- SIDEBAR - SELEZIONE FONTE DATI ---
+st.sidebar.header("📁 SELEZIONE DATABASE / CAMPIONATO")
+database_scelto = st.sidebar.selectbox(
+    "Scegli il Database da Analizzare:",
+    [
+        "🌐 Database Globale (INCROCI GEMINI)",
+        "🇮🇹 Database Italia Serie A (SERIE A)",
+    ],
+)
+
+foglio_target = "INCROCI GEMINI" if "Globale" in database_scelto else "SERIE A"
+
 try:
-    with st.spinner("Lettura foglio 'INCROCI GEMINI' da Google Drive..."):
-        df_base = fetch_data_from_drive(direct_url)
+    with st.spinner(f"Lettura foglio '{foglio_target}' da Google Drive..."):
+        df_base = fetch_data_from_drive(direct_url, sheet_name=foglio_target)
 
     if df_base is not None:
 
@@ -1037,7 +1055,8 @@ try:
             "UNDER 2,5 OSPITE",
         ]
 
-        # --- SIDEBAR - SELEZIONI IN ALTO ---
+        # --- SIDEBAR - MODALITÀ DI ANALISI ---
+        st.sidebar.markdown("---")
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
@@ -1109,7 +1128,7 @@ try:
         # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
             st.subheader(
-                "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion)"
+                f"🚨 Report Sottoperformance & Inversione Trend — Database: {database_scelto}"
             )
             st.caption(
                 "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica."
@@ -1331,7 +1350,7 @@ try:
                     mm_min = ma_valid.min()
                     mm_max = ma_valid.max()
 
-            st.subheader(f"📊 Analisi Strategia: `{strat_nome}`")
+            st.subheader(f"📊 Analisi Strategia: `{strat_nome}` ({database_scelto})")
 
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
@@ -1416,7 +1435,7 @@ try:
 
         elif "📂" in modalita:
             st.subheader(
-                f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`"
+                f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}` ({database_scelto})"
             )
 
             params_tot = {
@@ -1556,7 +1575,7 @@ try:
             )
 
         elif "🔥" in modalita:
-            st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
+            st.subheader(f"🔥 Strategie & Mercati in Ciclo Max da Puntare ({database_scelto})")
             st.caption(
                 "Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico"
             )
