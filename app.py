@@ -2,10 +2,10 @@ import io
 import json
 import os
 import re
+import urllib.parse
 import zipfile
 from datetime import datetime, timedelta
 import pandas as pd
-import numpy as np
 import requests
 import streamlit as st
 
@@ -375,7 +375,21 @@ def genera_e_invia_report_48h_strategie(
 def get_drive_direct_url(url):
     file_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if file_id_match:
-        return f"https://docs.google.com/spreadsheets/d/{file_id_match.group(1)}/export?format=xlsx"
+        file_id = file_id_match.group(1)
+        # Se l'URL contiene parametri di query con caratteri speciali/spazi (es. sheet=NAME)
+        # li convertiamo con urllib.parse.quote per evitare l'errore "URL can't contain control characters"
+        parsed_url = urllib.parse.urlparse(url)
+        if parsed_url.query:
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            if "sheet" in query_params:
+                sheet_name = query_params["sheet"][0]
+                sheet_encoded = urllib.parse.quote(sheet_name)
+                return f"https://docs.google.com/spreadsheets/d/{file_id}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
+            elif "tqx" in query_params:
+                return f"https://docs.google.com/spreadsheets/d/{file_id}/gviz/tq?{parsed_url.query}"
+        
+        # Endpoint XLSX predefinito per il link standard
+        return f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
     return url
 
 
@@ -444,30 +458,34 @@ def carica_quota_con_fallback(chiave_specifica, chiave_generica):
 
 
 def load_clean_df(file_bytes):
-    output = io.BytesIO()
-    with zipfile.ZipFile(file_bytes, "r") as zin:
-        with zipfile.ZipFile(output, "w") as zout:
-            for item in zin.infolist():
-                buffer = zin.read(item.filename)
-                if "sheet" in item.filename and item.filename.endswith(".xml"):
-                    buffer = re.sub(b"<autoFilter[^>]*/>", b"", buffer)
-                    buffer = re.sub(
-                        b"<autoFilter[^>]*>.*?</autoFilter>",
-                        b"",
-                        buffer,
-                        flags=re.DOTALL,
-                    )
-                    buffer = re.sub(
-                        b"<customFilters[^>]*>.*?</customFilters>",
-                        b"",
-                        buffer,
-                        flags=re.DOTALL,
-                    )
-                    buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
-                zout.writestr(item, buffer)
-    output.seek(0)
-
-    df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
+    # Prova a caricare come CSV (se scaricato via gviz/tq)
+    try:
+        df = pd.read_csv(io.BytesIO(file_bytes.getvalue()))
+    except Exception:
+        # Se fallisce il CSV, procede con il caricamento XLSX tramite zipfile/openpyxl
+        output = io.BytesIO()
+        with zipfile.ZipFile(file_bytes, "r") as zin:
+            with zipfile.ZipFile(output, "w") as zout:
+                for item in zin.infolist():
+                    buffer = zin.read(item.filename)
+                    if "sheet" in item.filename and item.filename.endswith(".xml"):
+                        buffer = re.sub(b"<autoFilter[^>]*/>", b"", buffer)
+                        buffer = re.sub(
+                            b"<autoFilter[^>]*>.*?</autoFilter>",
+                            b"",
+                            buffer,
+                            flags=re.DOTALL,
+                        )
+                        buffer = re.sub(
+                            b"<customFilters[^>]*>.*?</customFilters>",
+                            b"",
+                            buffer,
+                            flags=re.DOTALL,
+                        )
+                        buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
+                    zout.writestr(item, buffer)
+        output.seek(0)
+        df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
 
     cols_to_clean = [
         "SOMMA",
@@ -493,50 +511,6 @@ def load_clean_df(file_bytes):
                 df[col].astype(str).str.replace("00:00:00", "").str.strip()
             )
 
-    return df
-
-
-@st.cache_data(ttl=600)
-def load_serie_a_database(url):
-    """Carica e processa il foglio DATABASE ITALIA SERIE A"""
-    file_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
-    if file_id_match:
-        file_id = file_id_match.group(1)
-        csv_url = f"https://docs.google.com/spreadsheets/d/{file_id}/gviz/tq?tqx=out:csv&sheet=DATABASE ITALIA SERIE A"
-    else:
-        csv_url = url
-
-    df = pd.read_csv(csv_url, sep=None, engine='python')
-    
-    column_mapping = {
-        'HomeTeam': 'Casa',
-        'AwayTeam': 'Ospite',
-        'FTHG': 'Gol_Casa_FT',
-        'FTAG': 'Gol_Ospite_FT',
-        'HTHG': 'Gol_Casa_HT',
-        'HTAG': 'Gol_Ospite_HT',
-        'HS': 'Tiri_Casa',
-        'AS': 'Tiri_Ospite',
-        'HST': 'Tiri_Porta_Casa',
-        'AST': 'Tiri_Porta_Ospite',
-        'HC': 'Angoli_Casa',
-        'AC': 'Angoli_Ospite',
-        'HY': 'Gialli_Casa',
-        'AY': 'Gialli_Ospite',
-        'HR': 'Rossi_Casa',
-        'AR': 'Rossi_Ospite'
-    }
-    df = df.rename(columns=column_mapping)
-    
-    numeric_cols = [
-        'Gol_Casa_FT', 'Gol_Ospite_FT', 'Gol_Casa_HT', 'Gol_Ospite_HT', 
-        'Tiri_Casa', 'Tiri_Ospite', 'Tiri_Porta_Casa', 'Tiri_Porta_Ospite',
-        'Angoli_Casa', 'Angoli_Ospite', 'Gialli_Casa', 'Gialli_Ospite', 'Rossi_Casa', 'Rossi_Ospite'
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
-            
     return df
 
 
@@ -1146,7 +1120,6 @@ try:
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
                 "🔥 Cicli Max da Puntare",
-                "🇮🇹 Database Italia Serie A (Storico)",
             ],
         )
 
@@ -1747,136 +1720,6 @@ try:
                 st.info(
                     "Al momento nessuna strategia o mercato ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
                 )
-
-        # ==========================================
-        # NUOVA SEZIONE: DATABASE ITALIA SERIE A (STORICO)
-        # ==========================================
-        elif "🇮🇹" in modalita:
-            st.subheader("🇮🇹 Analisi Database Storico Serie A Italiana")
-            st.caption("Lettura automatica dal tab 'DATABASE ITALIA SERIE A' del foglio Google Drive.")
-
-            try:
-                df_serie_a = load_serie_a_database(LINK_GOOGLE_DRIVE)
-
-                st.sidebar.markdown("---")
-                st.sidebar.header("🎯 Filtri Serie A")
-
-                squadre_disponibili = sorted(
-                    list(
-                        set(df_serie_a['Casa'].dropna().unique()).union(
-                            set(df_serie_a['Ospite'].dropna().unique())
-                        )
-                    )
-                )
-                squadra_sel = st.sidebar.selectbox("Seleziona Squadra:", ["TUTTE"] + squadre_disponibili)
-
-                mercato_sa = st.sidebar.selectbox(
-                    "Seleziona Mercato Statistico:",
-                    ["Esiti Finali 1X2", "Under / Over 2.5", "Gol / NoGol", "Calci d'Angolo", "Disciplinare (Cartellini)"]
-                )
-
-                if squadra_sel != "TUTTE":
-                    df_filtrato_sa = df_serie_a[
-                        (df_serie_a['Casa'] == squadra_sel) | (df_serie_a['Ospite'] == squadra_sel)
-                    ].copy()
-                else:
-                    df_filtrato_sa = df_serie_a.copy()
-
-                totale_gare_sa = len(df_filtrato_sa)
-
-                st.markdown(f"#### Statistiche Generali — `{squadra_sel}`")
-
-                if squadra_sel != "TUTTE":
-                    df_casa_sa = df_filtrato_sa[df_filtrato_sa['Casa'] == squadra_sel]
-                    df_trasferta_sa = df_filtrato_sa[df_filtrato_sa['Ospite'] == squadra_sel]
-
-                    gol_fatti_sa = df_casa_sa['Gol_Casa_FT'].sum() + df_trasferta_sa['Gol_Ospite_FT'].sum()
-                    gol_subiti_sa = df_casa_sa['Gol_Ospite_FT'].sum() + df_trasferta_sa['Gol_Casa_FT'].sum()
-
-                    media_gf_sa = gol_fatti_sa / totale_gare_sa if totale_gare_sa > 0 else 0
-                    media_gs_sa = gol_subiti_sa / totale_gare_sa if totale_gare_sa > 0 else 0
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Partite Giocate", totale_gare_sa)
-                    c2.metric("Gol Fatti (Media)", format_num_comma(media_gf_sa))
-                    c3.metric("Gol Subiti (Media)", format_num_comma(media_gs_sa))
-                    c4.metric("Totale Gol Segnati", int(gol_fatti_sa))
-                else:
-                    c1, c2 = st.columns(2)
-                    c1.metric("Totale Partite Database", totale_gare_sa)
-                    gol_totali_db = (df_filtrato_sa['Gol_Casa_FT'] + df_filtrato_sa['Gol_Ospite_FT']).sum()
-                    media_gol_tot = gol_totali_db / totale_gare_sa if totale_gare_sa > 0 else 0
-                    c2.metric("Media Gol / Match DB", format_num_comma(media_gol_tot))
-
-                st.markdown("---")
-                st.markdown(f"#### Focus Mercato: `{mercato_sa}`")
-
-                if mercato_sa == "Under / Over 2.5":
-                    df_filtrato_sa['Totale_Gol'] = df_filtrato_sa['Gol_Casa_FT'] + df_filtrato_sa['Gol_Ospite_FT']
-                    over25 = (df_filtrato_sa['Totale_Gol'] > 2.5).sum()
-                    under25 = (df_filtrato_sa['Totale_Gol'] <= 2.5).sum()
-
-                    pct_over = (over25 / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-                    pct_under = (under25 / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-
-                    fair_over = (100 / pct_over) if pct_over > 0 else 0
-                    fair_under = (100 / pct_under) if pct_under > 0 else 0
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("% Over 2.5", f"{format_num_comma(pct_over, 1)}%")
-                    c2.metric("Quota Fair Over 2.5", format_num_comma(fair_over))
-                    c3.metric("% Under 2.5", f"{format_num_comma(pct_under, 1)}%")
-                    c4.metric("Quota Fair Under 2.5", format_num_comma(fair_under))
-
-                elif mercato_sa == "Gol / NoGol":
-                    gol_gol = ((df_filtrato_sa['Gol_Casa_FT'] > 0) & (df_filtrato_sa['Gol_Ospite_FT'] > 0)).sum()
-                    no_gol = totale_gare_sa - gol_gol
-
-                    pct_gg = (gol_gol / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-                    pct_ng = (no_gol / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("% Gol (GG)", f"{format_num_comma(pct_gg, 1)}%")
-                    c2.metric("Quota Fair GG", format_num_comma(100 / pct_gg if pct_gg > 0 else 0))
-                    c3.metric("% NoGol (NG)", f"{format_num_comma(pct_ng, 1)}%")
-                    c4.metric("Quota Fair NG", format_num_comma(100 / pct_ng if pct_ng > 0 else 0))
-
-                elif mercato_sa == "Calci d'Angolo":
-                    tot_angoli = df_filtrato_sa['Angoli_Casa'] + df_filtrato_sa['Angoli_Ospite']
-                    media_angoli = tot_angoli.mean() if totale_gare_sa > 0 else 0
-
-                    c1, c2 = st.columns(2)
-                    c1.metric("Media Calci d'Angolo / Match", format_num_comma(media_angoli))
-                    c2.metric("Totale Angoli Registrati", int(tot_angoli.sum()))
-
-                elif mercato_sa == "Disciplinare (Cartellini)":
-                    tot_gialli = df_filtrato_sa['Gialli_Casa'] + df_filtrato_sa['Gialli_Ospite']
-                    tot_rossi = df_filtrato_sa['Rossi_Casa'] + df_filtrato_sa['Rossi_Ospite']
-
-                    c1, c2 = st.columns(2)
-                    c1.metric("Media Gialli / Match", format_num_comma(tot_gialli.mean() if totale_gare_sa > 0 else 0))
-                    c2.metric("Media Rossi / Match", format_num_comma(tot_rossi.mean() if totale_gare_sa > 0 else 0))
-
-                elif mercato_sa == "Esiti Finali 1X2":
-                    vittorie_casa = (df_filtrato_sa['Gol_Casa_FT'] > df_filtrato_sa['Gol_Ospite_FT']).sum()
-                    pareggi = (df_filtrato_sa['Gol_Casa_FT'] == df_filtrato_sa['Gol_Ospite_FT']).sum()
-                    vittorie_trasferta = (df_filtrato_sa['Gol_Casa_FT'] < df_filtrato_sa['Gol_Ospite_FT']).sum()
-
-                    pct_1 = (vittorie_casa / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-                    pct_x = (pareggi / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-                    pct_2 = (vittorie_trasferta / totale_gare_sa * 100) if totale_gare_sa > 0 else 0
-
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("% Segno 1", f"{format_num_comma(pct_1, 1)}%", f"Fair: {format_num_comma(100/pct_1 if pct_1 > 0 else 0)}")
-                    c2.metric("% Segno X", f"{format_num_comma(pct_x, 1)}%", f"Fair: {format_num_comma(100/pct_x if pct_x > 0 else 0)}")
-                    c3.metric("% Segno 2", f"{format_num_comma(pct_2, 1)}%", f"Fair: {format_num_comma(100/pct_2 if pct_2 > 0 else 0)}")
-
-                st.markdown("---")
-                st.subheader("📋 Storico Partite Serie A Filtrate")
-                st.dataframe(df_filtrato_sa, use_container_width=True)
-
-            except Exception as e:
-                st.error(f"❌ Errore durante il caricamento del foglio 'DATABASE ITALIA SERIE A': {e}")
 
 except Exception as e:
     st.error(f"❌ Errore durante l'esecuzione dell'applicazione: {e}")
