@@ -1183,8 +1183,8 @@ try:
                 "Strategia attiva:", list(strat_map.keys())
             )
             st.sidebar.markdown("---")
-        elif "📂 Database Totale" in modalita:
-            st.sidebar.header("🎯 SELEZIONA MERCATO TOTALE")
+        elif "📂 Database Totale" in modalita or "📂 Database Italia Serie A" in modalita:
+            st.sidebar.header("🎯 SELEZIONA MERCATO")
             mercato_totale_sel = st.sidebar.selectbox(
                 "Mercato da analizzare:", MERCATI_TOTALI
             )
@@ -1546,9 +1546,10 @@ try:
                 mercato=params["MERCATO"],
             )
 
-        elif "📂 Database Totale" in modalita:
+        elif "📂 Database Totale" in modalita or "📂 Database Italia Serie A" in modalita:
+            titolo_sez = "Database Totale" if "Totale" in modalita else "Database Serie A Italia"
             st.subheader(
-                f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`"
+                f"📂 Analisi {titolo_sez} — Mercato: `{mercato_totale_sel}`"
             )
 
             params_tot = {
@@ -1608,7 +1609,7 @@ try:
                 st.markdown(get_combination_string(params_tot))
 
             st.markdown(
-                "#### 📈 Metrice Principali & Cicli di Ritardo (Database Completo)"
+                f"#### 📈 Metriche Principali & Cicli di Ritardo ({titolo_sez})"
             )
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
@@ -1686,31 +1687,6 @@ try:
                 col_ospite,
                 mercato=mercato_totale_sel,
             )
-
-        elif "📂 Database Italia Serie A" in modalita:
-            st.subheader("📂 Database Italia Serie A")
-            
-            if not df_base.empty:
-                st.success(f"Caricate con successo {len(df_base)} partite della Serie A Italia!")
-                
-                squadre = sorted(
-                    list(
-                        set(df_base["SQUADRA CASA"].dropna().unique()).union(
-                            set(df_base["SQUADRA OSPITE"].dropna().unique())
-                        )
-                    )
-                )
-                
-                squadra_sel = st.selectbox("Filtra per Squadra:", ["Tutte"] + squadre)
-                
-                df_display = df_base.copy()
-                if squadra_sel != "Tutte":
-                    df_display = df_display[
-                        (df_display["SQUADRA CASA"] == squadra_sel)
-                        | (df_display["SQUADRA OSPITE"] == squadra_sel)
-                    ]
-                
-                st.dataframe(df_display, use_container_width=True)
 
         elif "🔥" in modalita:
             st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
