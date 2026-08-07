@@ -236,9 +236,13 @@ def genera_e_invia_report_48h_strategie(
                 )
                 if not ora_str or ora_str.lower() == "nan":
                     ora_str = "00:00"
-                df_future.at[idx, "DATETIME_MATCH"] = pd.to_datetime(
-                    f"{data_str} {ora_str}", dayfirst=True, errors="coerce"
-                )
+                
+                # Conversione data flessibile (supporta sia DD/MM/YYYY che YYYY-MM-DD)
+                dt_obj = pd.to_datetime(f"{data_str} {ora_str}", dayfirst=True, errors="coerce")
+                if pd.isna(dt_obj):
+                    dt_obj = pd.to_datetime(f"{data_str} {ora_str}", errors="coerce")
+                    
+                df_future.at[idx, "DATETIME_MATCH"] = dt_obj
             except Exception:
                 pass
 
@@ -255,15 +259,18 @@ def genera_e_invia_report_48h_strategie(
             }
             totale_match_trovati += len(df_48h)
 
+    # Caso in cui non ci sono match nelle prossime 48h
     if totale_match_trovati == 0:
-        invia_telegram(
+        msg_empty = (
             f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
             f"⏱️ _Finestra:_ `{adesso.strftime('%d/%m %H:%M')}` ➔ `{limite_48h.strftime('%d/%m %H:%M')}`\n\n"
             f"ℹ️ Nessun match in programma nelle prossime 48 ore per alcuna strategia."
         )
-        st.info(
-            "Report inviato su Telegram: nessuna partita nelle prossime 48h per le strategie."
-        )
+        ok = invia_telegram(msg_empty)
+        if ok:
+            st.info("ℹ️ Report inviato su Telegram: nessuna partita programmata nelle prossime 48h.")
+        else:
+            st.error("❌ Nessun match trovato e errore durante l'invio della notifica su Telegram.")
         return
 
     messaggio = f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
@@ -1470,7 +1477,7 @@ try:
                 st.markdown(get_combination_string(params_tot))
 
             st.markdown(
-                "#### 📈 Metriche Principali & Cicli di Ritardo (Database Completo)"
+                "#### 📈 Metrice Principali & Cicli di Ritardo (Database Completo)"
             )
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
