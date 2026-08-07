@@ -2,7 +2,6 @@ import io
 import json
 import os
 import re
-import urllib.parse
 import zipfile
 from datetime import datetime, timedelta
 import pandas as pd
@@ -20,22 +19,13 @@ st.set_page_config(
 # ==========================================
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
 FILE_QUOTE_LOCALE = "quote_salvate.json"
+FILE_DATABASE_SERIEA = "database_serieA.csv"
 
 TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
 
-# LISTA DESTINATARI: Tu in privato + Il canale condiviso
 TELEGRAM_DESTINATARI = [
-    "1192615708",      # Il tuo Chat ID Privato
-    "-1004447605760"    # ID del Canale/Gruppo Telegram
-]
-
-FOGLI_DISPONIBILI = [
-    "INCROCI GEMINI",
-    "DATABASE ITALIA SERIE A",
-    "DATABASE OLANDA",
-    "DATABASE FRANCIA SERIE A",
-    "DATABASE GERMANIA SERIE A",
-    "DATABASE SPAGNA SERIE A"
+    "1192615708",      # Chat ID Privato
+    "-1004447605760"    # ID Canale/Gruppo
 ]
 
 
@@ -43,7 +33,6 @@ FOGLI_DISPONIBILI = [
 # GESTIONE SALVATAGGIO PERMANENTE E TELEGRAM
 # ==========================================
 def carica_quote_locali():
-    """Carica il dizionario delle quote salvate dal file JSON locale."""
     if os.path.exists(FILE_QUOTE_LOCALE):
         try:
             with open(FILE_QUOTE_LOCALE, "r", encoding="utf-8") as f:
@@ -54,7 +43,6 @@ def carica_quote_locali():
 
 
 def salva_quota_locale(chiave_match, valore_quota):
-    """Salva una singola quota all'interno del file JSON locale."""
     quote = carica_quote_locali()
     quote[chiave_match] = valore_quota
     with open(FILE_QUOTE_LOCALE, "w", encoding="utf-8") as f:
@@ -67,14 +55,12 @@ if "saved_odds" not in st.session_state:
 
 
 def escape_markdown(text):
-    """Pulisce il testo dai caratteri speciali per il Markdown di Telegram."""
     if not isinstance(text, str):
         text = str(text)
     return re.sub(r'[*_`\[\]]', '', text)
 
 
 def invia_singolo_messaggio_telegram(chat_id, testo):
-    """Invia un singolo blocco di testo tramite Telegram API."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -92,7 +78,6 @@ def invia_singolo_messaggio_telegram(chat_id, testo):
 
 
 def invia_telegram(testo):
-    """Divide i messaggi se troppo lunghi (>3500 char) e li invia ai destinatari."""
     MAX_CHAR = 3500
     blocchi = []
     
@@ -114,7 +99,7 @@ def invia_telegram(testo):
     dettagli_errori = []
 
     for chat_id in TELEGRAM_DESTINATARI:
-        for blocco in blocchi:
+        for i, blocco in enumerate(blocchi):
             ok, err_msg = invia_singolo_messaggio_telegram(chat_id, blocco)
             if not ok:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -135,13 +120,10 @@ def invia_telegram(testo):
 
 
 def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
-    """Calcola ed invia il resoconto sui match ESITATI con quota salvata."""
     quote_salvate = carica_quote_locali()
 
     if not quote_salvate:
-        st.warning(
-            "⚠️ Nessuna quota salvata trovata nel database locale. Inizia a salvare le quote nelle strategie."
-        )
+        st.warning("⚠️ Nessuna quota salvata trovata nel database locale.")
         return
 
     report_strats = {}
@@ -222,11 +204,10 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
 
     ok = invia_telegram(messaggio)
     if ok:
-        st.success(f"✅ Report Esiti inviato! ({tot_globali} match analizzati)")
+        st.success(f"✅ Report Esiti inviato con successo! ({tot_globali} match analizzati)")
 
 
 def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_ospite):
-    """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h."""
     adesso = datetime.now()
     limite_48h = adesso + timedelta(hours=48)
 
@@ -238,11 +219,7 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
         df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
         tot_match_strat = len(df_played)
 
-        win_rate_reale = (
-            (df_played["WIN"].sum() / tot_match_strat * 100)
-            if tot_match_strat > 0
-            else 0
-        )
+        win_rate_reale = (df_played["WIN"].sum() / tot_match_strat * 100) if tot_match_strat > 0 else 0
         quota_limite_strat = (100 / win_rate_reale) if win_rate_reale > 0 else 0.0
 
         df_future = df_strat[df_strat["GOL CASA"].isna()].copy()
@@ -252,10 +229,7 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
 
         df_future["DATETIME_MATCH"] = pd.NaT
         data_cols = [c for c in df_future.columns if "DATA" in str(c).upper()]
-        ora_cols = [
-            c for c in df_future.columns
-            if any(k in str(c).upper() for k in ["ORA", "ORARIO"])
-        ]
+        ora_cols = [c for c in df_future.columns if any(k in str(c).upper() for k in ["ORA", "ORARIO"])]
 
         for idx, row in df_future.iterrows():
             try:
@@ -272,9 +246,7 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
             except Exception:
                 pass
 
-        mask_48h = (df_future["DATETIME_MATCH"] >= adesso) & (
-            df_future["DATETIME_MATCH"] <= limite_48h
-        )
+        mask_48h = (df_future["DATETIME_MATCH"] >= adesso) & (df_future["DATETIME_MATCH"] <= limite_48h)
         df_48h = df_future[mask_48h].copy().sort_values(by="DATETIME_MATCH")
 
         if len(df_48h) > 0:
@@ -291,9 +263,8 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
             f"⏱️ _Finestra:_ `{adesso.strftime('%d/%m %H:%M')}` ➔ `{limite_48h.strftime('%d/%m %H:%M')}`\n\n"
             f"ℹ️ Nessun match in programma nelle prossime 48 ore per alcuna strategia."
         )
-        ok = invia_telegram(msg_empty)
-        if ok:
-            st.info("ℹ️ Report inviato su Telegram: nessuna partita programmata nelle prossime 48h.")
+        invia_telegram(msg_empty)
+        st.info("ℹ️ Report inviato: nessuna partita programmata nelle prossime 48h.")
         return
 
     messaggio = f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
@@ -317,11 +288,7 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
 
             m_key, _ = get_match_keys(row, col_casa, col_ospite, m_strat)
 
-            dt_str = (
-                row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M")
-                if pd.notna(row["DATETIME_MATCH"])
-                else "N/D"
-            )
+            dt_str = row["DATETIME_MATCH"].strftime("%d/%m/%Y %H:%M") if pd.notna(row["DATETIME_MATCH"]) else "N/D"
 
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
@@ -345,18 +312,16 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
 
     ok = invia_telegram(messaggio)
     if ok:
-        st.success(f"✅ Report 48h inviato su Telegram! Notificati {totale_match_trovati} match.")
+        st.success(f"✅ Report inviato con successo! Notificati {totale_match_trovati} match.")
 
 
 # ==========================================
 # UTILITÀ E PULIZIA DATI
 # ==========================================
-def get_drive_direct_url(url, sheet_name="INCROCI GEMINI"):
+def get_drive_direct_url(url):
     file_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if file_id_match:
-        file_id = file_id_match.group(1)
-        sheet_encoded = urllib.parse.quote(sheet_name)
-        return f"https://docs.google.com/spreadsheets/d/{file_id}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
+        return f"https://docs.google.com/spreadsheets/d/{file_id_match.group(1)}/export?format=xlsx"
     return url
 
 
@@ -397,7 +362,7 @@ def get_match_keys(row, col_casa, col_ospite, mercato=""):
     casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
     data_match = ""
     for c in row.index:
-        if "DATA" in str(c).upper():
+        if "DATA" in str(c).upper() or "DATE" in str(c).upper():
             data_match = str(row[c]).strip()
             break
 
@@ -411,63 +376,64 @@ def get_match_keys(row, col_casa, col_ospite, mercato=""):
 
 def carica_quota_con_fallback(chiave_specifica, chiave_generica):
     quote = carica_quote_locali()
-
     if chiave_specifica in quote:
         return quote[chiave_specifica], True
-
     for k, v in quote.items():
         if k.startswith(chiave_generica):
             return v, False
-
     return 1.00, False
 
 
-def load_clean_df(file_bytes, sheet_target="INCROCI GEMINI"):
-    try:
-        df = pd.read_csv(io.BytesIO(file_bytes.getvalue()))
-    except Exception:
-        output = io.BytesIO()
-        with zipfile.ZipFile(file_bytes, "r") as zin:
-            with zipfile.ZipFile(output, "w") as zout:
-                for item in zin.infolist():
-                    buffer = zin.read(item.filename)
-                    if "sheet" in item.filename and item.filename.endswith(".xml"):
-                        buffer = re.sub(b"<autoFilter[^>]*/>", b"", buffer)
-                        buffer = re.sub(
-                            b"<autoFilter[^>]*>.*?</autoFilter>",
-                            b"",
-                            buffer,
-                            flags=re.DOTALL,
-                        )
-                        buffer = re.sub(
-                            b"<customFilters[^>]*>.*?</customFilters>",
-                            b"",
-                            buffer,
-                            flags=re.DOTALL,
-                        )
-                        buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
-                    zout.writestr(item, buffer)
-        output.seek(0)
-        df = pd.read_excel(output, sheet_name=sheet_target, engine="openpyxl")
+def load_clean_df(file_bytes):
+    output = io.BytesIO()
+    with zipfile.ZipFile(file_bytes, "r") as zin:
+        with zipfile.ZipFile(output, "w") as zout:
+            for item in zin.infolist():
+                buffer = zin.read(item.filename)
+                if "sheet" in item.filename and item.filename.endswith(".xml"):
+                    buffer = re.sub(b"<autoFilter[^>]*/>", b"", buffer)
+                    buffer = re.sub(b"<autoFilter[^>]*>.*?</autoFilter>", b"", buffer, flags=re.DOTALL)
+                    buffer = re.sub(b"<customFilters[^>]*>.*?</customFilters>", b"", buffer, flags=re.DOTALL)
+                    buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
+                zout.writestr(item, buffer)
+    output.seek(0)
 
-    cols_to_clean = [
-        "SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE", "GOL CASA", "GOL OSPITE"
-    ]
+    df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
+
+    cols_to_clean = ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE", "GOL CASA", "GOL OSPITE"]
     for col in cols_to_clean:
         if col in df.columns:
             df[col] = clean_numeric_column(df[col])
 
     for col in df.columns:
         if "DATA" in str(col).upper():
-            df[col] = (
-                pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
-            ).fillna(df[col])
+            df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y").fillna(df[col])
         elif any(k in str(col).upper() for k in ["ORA", "ORARIO"]):
-            df[col] = (
-                df[col].astype(str).str.replace("00:00:00", "").str.strip()
-            )
+            df[col] = df[col].astype(str).str.replace("00:00:00", "").str.strip()
 
     return df
+
+
+@st.cache_data(ttl=300)
+def load_serie_a_database():
+    """Carica e adatta il file CSV della Serie A per lo Streamlit."""
+    if not os.path.exists(FILE_DATABASE_SERIEA):
+        return None
+    try:
+        df_sa = pd.read_csv(FILE_DATABASE_SERIEA, sep=";")
+        df_sa = df_sa.rename(columns={
+            "HomeTeam": "CASA",
+            "AwayTeam": "OSPITE",
+            "FTHG": "GOL CASA",
+            "FTAG": "GOL OSPITE",
+            "Date": "DATA"
+        })
+        df_sa["GOL CASA"] = pd.to_numeric(df_sa["GOL CASA"], errors="coerce")
+        df_sa["GOL OSPITE"] = pd.to_numeric(df_sa["GOL OSPITE"], errors="coerce")
+        return df_sa
+    except Exception as e:
+        st.error(f"Errore lettura {FILE_DATABASE_SERIEA}: {e}")
+        return None
 
 
 def detect_team_columns(df):
@@ -475,28 +441,18 @@ def detect_team_columns(df):
 
     for c in df.columns:
         c_clean = str(c).upper().strip()
-        if c_clean in [
-            "CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", "SQUADRA 1", "SQUADRA_1", "SQUADRA H", "HOME TEAM"
-        ]:
+        if c_clean in ["CASA", "SQUADRA CASA", "SQUADRA_CASA", "HOME", "SQUADRA 1", "SQUADRA_1", "HOME TEAM", "HOMETEAM"]:
             col_casa = c
-        elif c_clean in [
-            "OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", "SQUADRA 2", "SQUADRA_2", "TRASFERTA", "SQUADRA A", "AWAY TEAM"
-        ]:
+        elif c_clean in ["OSPITE", "SQUADRA OSPITE", "SQUADRA_OSPITE", "AWAY", "SQUADRA 2", "SQUADRA_2", "AWAY TEAM", "AWAYTEAM"]:
             col_ospite = c
 
     if not col_casa or not col_ospite:
         text_cols = [c for c in df.columns if df[c].dtype == "object" or df[c].dtype == "string"]
         for c in text_cols:
             c_clean = str(c).upper().strip()
-            if not col_casa and "CASA" in c_clean and not any(
-                x in c_clean for x in ["GOL", "MEDIA", "C1", "XG", "SUBITI", "FATTI", "QUOTA"]
-            ):
+            if not col_casa and "CASA" in c_clean and not any(x in c_clean for x in ["GOL", "MEDIA", "C1", "XG"]):
                 col_casa = c
-            elif not col_ospite and any(
-                x in c_clean for x in ["OSPITE", "TRASFERTA", "AWAY"]
-            ) and not any(
-                x in c_clean for x in ["GOL", "MEDIA", "C2", "XG", "SUBITI", "FATTI", "QUOTA"]
-            ):
+            elif not col_ospite and any(x in c_clean for x in ["OSPITE", "TRASFERTA", "AWAY"]) and not any(x in c_clean for x in ["GOL", "MEDIA", "C2", "XG"]):
                 col_ospite = c
 
     if not col_casa or not col_ospite:
@@ -509,9 +465,6 @@ def detect_team_columns(df):
         if len(string_cols) >= 2:
             col_casa = col_casa or string_cols[0]
             col_ospite = col_ospite or string_cols[1]
-        elif len(string_cols) == 1:
-            col_casa = col_casa or string_cols[0]
-            col_ospite = col_ospite or string_cols[0]
 
     return col_casa, col_ospite
 
@@ -737,21 +690,27 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
         for idx, row in df_future.iterrows():
             m_key, generic_key = get_match_keys(row, col_casa, col_ospite, mercato)
-            nome_casa, nome_ospite = get_clean_team_names(row, col_casa, col_ospite)
+            nome_casa, nome_ospite = get_clean_team_names(
+                row, col_casa, col_ospite
+            )
 
             data_match = ""
             for col_d in df_future.columns:
-                if "DATA" in str(col_d).upper():
+                if "DATA" in str(col_d).upper() or "DATE" in str(col_d).upper():
                     data_match = f" ({row[col_d]})"
                     break
 
-            c_info, c_qlim, c_input, c_btn, c_res = st.columns([3, 1.5, 1.5, 1.2, 2])
+            c_info, c_qlim, c_input, c_btn, c_res = st.columns(
+                [3, 1.5, 1.5, 1.2, 2]
+            )
 
             with c_info:
                 st.markdown(f"**{nome_casa} - {nome_ospite}**{data_match}")
 
             with c_qlim:
-                st.markdown(f"Quota Limite: **{format_num_comma(quota_limite)}**")
+                st.markdown(
+                    f"Quota Limite: **{format_num_comma(quota_limite)}**"
+                )
 
             val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
 
@@ -766,7 +725,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 )
 
             with c_btn:
-                st.markdown("<div style='padding-top: 25px;'></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='padding-top: 25px;'></div>",
+                    unsafe_allow_html=True,
+                )
                 if st.button("💾 Salva", key=f"btn_{m_key}"):
                     salva_quota_locale(m_key, q_val)
                     st.toast(
@@ -786,7 +748,9 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
                 if q_val > 1.00:
                     if float(q_val) >= quota_limite:
-                        st.success(f"🟢 **VALUE BET!** ({format_num_comma(q_val)})")
+                        st.success(
+                            f"🟢 **VALUE BET!** ({format_num_comma(q_val)})"
+                        )
                     else:
                         st.error(f"🔴 **NO VALUE** ({format_num_comma(q_val)})")
 
@@ -808,27 +772,40 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
         cols_played = []
         for c in df_played.columns:
-            if any(k in str(c).upper() for k in ["DATA", "ORA", "ORARIO"]):
+            if any(k in str(c).upper() for k in ["DATA", "DATE", "ORA", "ORARIO"]):
                 if c not in cols_played:
                     cols_played.append(c)
 
-        if col_casa and col_casa in df_played.columns and col_casa not in cols_played:
+        if (
+            col_casa
+            and col_casa in df_played.columns
+            and col_casa not in cols_played
+        ):
             cols_played.append(col_casa)
-        if col_ospite and col_ospite in df_played.columns and col_ospite not in cols_played and col_ospite != col_casa:
+        if (
+            col_ospite
+            and col_ospite in df_played.columns
+            and col_ospite not in cols_played
+            and col_ospite != col_casa
+        ):
             cols_played.append(col_ospite)
 
         cols_played.append("QUOTA SALVATA")
 
         altre_cols = [
-            c for c in df_played.columns
+            c
+            for c in df_played.columns
             if any(
                 k in str(c).upper()
                 for k in ["GOL CASA", "GOL OSPITE", "SOMMA", "DC", "C1", "C2", "WIN"]
-            ) and c not in cols_played
+            )
+            and c not in cols_played
         ]
         cols_played.extend(altre_cols)
 
-        df_display = df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
+        df_display = (
+            df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
+        )
         df_display.index = range(1, len(df_display) + 1)
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
@@ -841,11 +818,16 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 )
 
         float_cols = [
-            c for c in df_display.select_dtypes(include=["float", "float64"]).columns
+            c
+            for c in df_display.select_dtypes(
+                include=["float", "float64"]
+            ).columns
             if c not in integer_cols and c != "QUOTA SALVATA"
         ]
         for col in float_cols:
-            df_display[col] = df_display[col].apply(lambda x: format_num_comma(x))
+            df_display[col] = df_display[col].apply(
+                lambda x: format_num_comma(x)
+            )
 
         st.dataframe(df_display, use_container_width=True)
 
@@ -855,28 +837,22 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 # ==========================================
 st.title("⚽ Dashboard Analisi xG & Value Bet Finder")
 
-# SELEZIONE DEL FOGLIO IN SIDEBAR
-st.sidebar.header("📁 FOGLIO GOOGLE DRIVE")
-foglio_selezionato = st.sidebar.selectbox(
-    "Seleziona il foglio di lavoro:",
-    FOGLI_DISPONIBILI,
-    index=0
-)
-
-direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE, foglio_selezionato)
+direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
 @st.cache_data(ttl=300)
-def fetch_data_from_drive(url, sheet_name):
+def fetch_data_from_drive(url):
     response = requests.get(url)
     if response.status_code == 200:
-        return load_clean_df(io.BytesIO(response.content), sheet_target=sheet_name)
+        return load_clean_df(io.BytesIO(response.content))
     return None
 
 
 try:
-    with st.spinner(f"Lettura dati da Google Drive ({foglio_selezionato})..."):
-        df_raw = fetch_data_from_drive(direct_url, foglio_selezionato)
+    with st.spinner("Lettura dati da Google Drive..."):
+        df_raw = fetch_data_from_drive(direct_url)
+
+    df_seriea = load_serie_a_database()
 
     if df_raw is not None:
         df_base = df_raw.copy()
@@ -980,10 +956,28 @@ try:
         strat_map = {item["nome"]: item for item in ranked_strategies}
 
         MERCATI_TOTALI = [
-            "1", "X", "2", "1X", "X2", "12", "GOL", "NO GOL",
-            "OVER 1,5", "OVER 2,5", "UNDER 1,5", "UNDER 2,5",
-            "GOL CASA", "OVER 1,5 CASA", "OVER 2,5 CASA", "UNDER 1,5 CASA", "UNDER 2,5 CASA",
-            "GOL OSPITE", "OVER 1,5 OSPITE", "OVER 2,5 OSPITE", "UNDER 1,5 OSPITE", "UNDER 2,5 OSPITE",
+            "1",
+            "X",
+            "2",
+            "1X",
+            "X2",
+            "12",
+            "GOL",
+            "NO GOL",
+            "OVER 1,5",
+            "OVER 2,5",
+            "UNDER 1,5",
+            "UNDER 2,5",
+            "GOL CASA",
+            "OVER 1,5 CASA",
+            "OVER 2,5 CASA",
+            "UNDER 1,5 CASA",
+            "UNDER 2,5 CASA",
+            "GOL OSPITE",
+            "OVER 1,5 OSPITE",
+            "OVER 2,5 OSPITE",
+            "UNDER 1,5 OSPITE",
+            "UNDER 2,5 OSPITE",
         ]
 
         # --- SIDEBAR - SELEZIONI IN ALTO ---
@@ -994,6 +988,7 @@ try:
                 "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
+                "🇮🇹 Database Serie A Italia",
                 "🔥 Cicli Max da Puntare",
             ],
         )
@@ -1001,11 +996,21 @@ try:
         st.sidebar.markdown("---")
         if "📊" in modalita:
             st.sidebar.header("🎯 SELEZIONA STRATEGIA")
-            strat_nome = st.sidebar.selectbox("Strategia attiva:", list(strat_map.keys()))
+            strat_nome = st.sidebar.selectbox(
+                "Strategia attiva:", list(strat_map.keys())
+            )
             st.sidebar.markdown("---")
         elif "📂" in modalita:
             st.sidebar.header("🎯 SELEZIONA MERCATO TOTALE")
-            mercato_totale_sel = st.sidebar.selectbox("Mercato da analizzare:", MERCATI_TOTALI)
+            mercato_totale_sel = st.sidebar.selectbox(
+                "Mercato da analizzare:", MERCATI_TOTALI
+            )
+            st.sidebar.markdown("---")
+        elif "🇮🇹" in modalita:
+            st.sidebar.header("🎯 SELEZIONA MERCATO SERIE A")
+            mercato_seriea_sel = st.sidebar.selectbox(
+                "Mercato da analizzare (Serie A):", MERCATI_TOTALI
+            )
             st.sidebar.markdown("---")
 
         if st.sidebar.button("🔄 Aggiorna Dati da Google Drive"):
@@ -1016,42 +1021,66 @@ try:
         st.sidebar.header("📌 Selezione Colonne Squadre")
         all_cols = list(df_base.columns)
 
-        idx_casa = all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
+        idx_casa = (
+            all_cols.index(col_casa_auto) if col_casa_auto in all_cols else 0
+        )
         idx_ospite = (
             all_cols.index(col_ospite_auto)
             if col_ospite_auto in all_cols
             else (1 if len(all_cols) > 1 else 0)
         )
 
-        col_casa = st.sidebar.selectbox("Colonna Squadra Casa (o Partita Intera):", all_cols, index=idx_casa)
-        col_ospite = st.sidebar.selectbox("Colonna Squadra Ospite:", all_cols, index=idx_ospite)
+        col_casa = st.sidebar.selectbox(
+            "Colonna Squadra Casa (o Partita Intera):",
+            all_cols,
+            index=idx_casa,
+        )
+        col_ospite = st.sidebar.selectbox(
+            "Colonna Squadra Ospite:", all_cols, index=idx_ospite
+        )
 
         # SEZIONE TELEGRAM BOT NELLA SIDEBAR
         st.sidebar.markdown("---")
         st.sidebar.header("📲 NOTIFICHE TELEGRAM")
-        if st.sidebar.button("🚀 Invia Report 48h su Telegram", use_container_width=True):
-            genera_e_invia_report_48h_strategie(df_base, STRATEGIE_SALVATE, col_casa, col_ospite)
+        if st.sidebar.button(
+            "🚀 Invia Report 48h su Telegram", use_container_width=True
+        ):
+            genera_e_invia_report_48h_strategie(
+                df_base, STRATEGIE_SALVATE, col_casa, col_ospite
+            )
 
-        if st.sidebar.button("📈 Invia Report Esiti su Telegram", use_container_width=True):
-            invia_report_esiti_telegram(df_base, STRATEGIE_SALVATE, col_casa, col_ospite)
+        if st.sidebar.button(
+            "📈 Invia Report Esiti su Telegram", use_container_width=True
+        ):
+            invia_report_esiti_telegram(
+                df_base, STRATEGIE_SALVATE, col_casa, col_ospite
+            )
 
         # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
-            st.subheader(f"🚨 Report Sottoperformance & Inversione Trend ({foglio_selezionato})")
+            st.subheader(
+                "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion)"
+            )
             st.caption(
                 "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica."
             )
 
-            finestra_alert = st.sidebar.slider("Finestra Media Mobile per Alert", 10, 50, 20, 5)
+            finestra_alert = st.sidebar.slider(
+                "Finestra Media Mobile per Alert", 10, 50, 20, 5
+            )
 
             alert_underperforming = []
             alert_bounce_back = []
             alert_minimo_ritardo_zero = []
 
-            def analizza_serie_per_trend(tipo_entita, nome_entita, mercato_entita, df_played, wr_target, dettagli_str):
+            def analizza_serie_per_trend(
+                tipo_entita, nome_entita, mercato_entita, df_played, wr_target, dettagli_str
+            ):
                 tot = len(df_played)
                 if tot >= finestra_alert:
-                    df_played["MA"] = df_played["WIN"].rolling(window=finestra_alert).mean() * 100
+                    df_played["MA"] = (
+                        df_played["WIN"].rolling(window=finestra_alert).mean() * 100
+                    )
                     ma_series = df_played["MA"].dropna()
                     if len(ma_series) >= 2:
                         mm_att = ma_series.iloc[-1]
@@ -1063,7 +1092,6 @@ try:
                         res_delays = calculate_delays_and_cycles(df_played["WIN"])
                         ritardo_attuale = res_delays["ritardo_attuale"]
 
-                        # 1. TABELLA SOTTOPERFORMANCE
                         if mm_att < wr_target:
                             in_zona_minimo = (
                                 "🔴 SI (AL MINIMO STORICO)"
@@ -1085,7 +1113,6 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        # 2. TABELLA MINIMO STORICO + RITARDO 0
                         era_o_e_al_minimo = (mm_prev <= (mm_min_storica + 2.5)) or (mm_att <= (mm_min_storica + 2.5))
                         if era_o_e_al_minimo and ritardo_attuale == 0 and last_win == 1:
                             alert_minimo_ritardo_zero.append({
@@ -1101,7 +1128,6 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        # 3. TABELLA INVERSIONE GENERICA
                         elif last_win == 1 and mm_att > mm_prev and mm_att < wr_target:
                             alert_bounce_back.append({
                                 "Tipo": tipo_entita,
@@ -1157,18 +1183,16 @@ try:
                 )
 
             st.markdown("### 🔥 INIZIO TREND RIALZISTA (Minimo Storico Toccato + Ritardo 0)")
-            st.caption(
-                "🎯 **I MIGLIORI INGRESSI:** Strategie o Mercati che hanno toccato il loro minimo storico di Media Mobile e nell'ultima partita hanno fatto WIN (Ritardo 0)."
-            )
+            st.caption("🎯 **I MIGLIORI INGRESSI:** Strategie o Mercati che hanno toccato il loro minimo storico di Media Mobile e nell'ultima partita hanno fatto WIN (Ritardo 0).")
             if alert_minimo_ritardo_zero:
                 st.dataframe(pd.DataFrame(alert_minimo_ritardo_zero), use_container_width=True)
             else:
-                st.info("Al momento nessuna strategia/mercato ha registrato una WIN nell'ultimo match al Minimo Storico.")
+                st.info("Al momento nessuna strategia/mercato ha registrato una WIN nell'ultimo match esattamente al Minimo Storico.")
 
             st.markdown("---")
 
             st.markdown("### 📈 ALTRI SEGNALI DI RIPRESA (Rimbalzo sotto-media)")
-            st.caption("Mercati sotto la media storica che hanno registrato una WIN nell'ultimo match.")
+            st.caption("Mercati sotto la media storica che hanno registrato una WIN nell'ultimo match, ma non erano al loro minimo storico assoluto.")
             if alert_bounce_back:
                 st.dataframe(pd.DataFrame(alert_bounce_back), use_container_width=True)
             else:
@@ -1177,7 +1201,7 @@ try:
             st.markdown("---")
 
             st.markdown("### 📉 WATCHLIST SOTTOPERFORMANCE (In Attesa del Trigger / WIN)")
-            st.caption("Elenco dei mercati attualmente sotto la media storica.")
+            st.caption("Elenco dei mercati attualmente sotto la media storica. Attendi che facciano una WIN prima di puntarli.")
             if alert_underperforming:
                 st.dataframe(pd.DataFrame(alert_underperforming), use_container_width=True)
             else:
@@ -1225,7 +1249,7 @@ try:
                     mm_min = ma_valid.min()
                     mm_max = ma_valid.max()
 
-            st.subheader(f"📊 Analisi Strategia: `{strat_nome}` ({foglio_selezionato})")
+            st.subheader(f"📊 Analisi Strategia: `{strat_nome}`")
 
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
@@ -1298,16 +1322,10 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(
-                df_strat,
-                quota_limite,
-                col_casa,
-                col_ospite,
-                mercato=params["MERCATO"],
-            )
+            render_tables(df_strat, quota_limite, col_casa, col_ospite, mercato=params["MERCATO"])
 
         elif "📂" in modalita:
-            st.subheader(f"📂 Analisi Database Totale [{foglio_selezionato}] — Mercato: `{mercato_totale_sel}`")
+            st.subheader(f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`")
 
             params_tot = {
                 "SOMMA": None,
@@ -1427,19 +1445,143 @@ try:
                 })
                 st.line_chart(chart_data)
 
-            render_tables(
-                df_tot,
-                quota_limite,
-                col_casa,
-                col_ospite,
-                mercato=mercato_totale_sel,
-            )
+            render_tables(df_tot, quota_limite, col_casa, col_ospite, mercato=mercato_totale_sel)
+
+        elif "🇮🇹" in modalita:
+            st.subheader(f"🇮🇹 Analisi Database Serie A Italiana — Mercato: `{mercato_seriea_sel}`")
+
+            if df_seriea is None:
+                st.error("⚠️ File `database_serieA.csv` non trovato o non leggibile nella directory principale.")
+            else:
+                params_sa = {
+                    "SOMMA": None,
+                    "DC": None,
+                    "C1": None,
+                    "C2": None,
+                    "MEDIA CASA": None,
+                    "MEDIA OSPITE": None,
+                    "MERCATO": mercato_seriea_sel,
+                }
+
+                df_sa_filt = apply_filters(df_seriea, params_sa)
+                df_played_sa = df_sa_filt[df_sa_filt["GOL CASA"].notna()].copy()
+                tot_match_sa = len(df_played_sa)
+
+                win_rate_reale_sa = (
+                    (df_played_sa["WIN"].sum() / tot_match_sa * 100)
+                    if tot_match_sa > 0
+                    else 0
+                )
+                quota_limite_sa = (100 / win_rate_reale_sa) if win_rate_reale_sa > 0 else 0
+
+                res_delays_sa = (
+                    calculate_delays_and_cycles(df_played_sa["WIN"])
+                    if tot_match_sa > 0
+                    else {
+                        "ritardo_attuale": 0,
+                        "ritardo_max": 0,
+                        "ritardo_medio": 0.0,
+                        "ciclo_max_storico": 0,
+                        "ciclo_attuale": 0,
+                    }
+                )
+
+                st.sidebar.markdown("---")
+                finestra_ma_sa = st.sidebar.slider("Finestra Media Mobile (Partite)", 10, 100, 38, 5)
+
+                mm_att_sa, mm_min_sa, mm_max_sa = 0.0, 0.0, 0.0
+                if tot_match_sa >= finestra_ma_sa:
+                    df_played_sa["MA"] = df_played_sa["WIN"].rolling(window=finestra_ma_sa).mean() * 100
+                    df_played_sa["FREQ_CUM_DINAMICA"] = df_played_sa["WIN"].expanding().mean() * 100
+
+                    ma_valid_sa = df_played_sa["MA"].dropna()
+                    if len(ma_valid_sa) > 0:
+                        mm_att_sa = ma_valid_sa.iloc[-1]
+                        mm_min_sa = ma_valid_sa.min()
+                        mm_max_sa = ma_valid_sa.max()
+
+                with st.container(border=True):
+                    st.markdown(get_combination_string(params_sa))
+
+                st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo (Serie A)")
+
+                r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
+                with r1_c1:
+                    with st.container(border=True):
+                        st.caption("Match Totali")
+                        st.markdown(f"### {tot_match_sa}")
+
+                with r1_c2:
+                    with st.container(border=True):
+                        st.caption("Win Rate Reale")
+                        st.markdown(f"### {format_num_comma(win_rate_reale_sa)}%")
+
+                with r1_c3:
+                    with st.container(border=True):
+                        st.caption("Quota Fair / Limite")
+                        st.markdown(f"### {format_num_comma(quota_limite_sa)}")
+
+                with r1_c4:
+                    with st.container(border=True):
+                        st.caption("Ritardo Attuale")
+                        st.markdown(f"### {res_delays_sa['ritardo_attuale']}")
+
+                with r1_c5:
+                    with st.container(border=True):
+                        st.caption("Ritardo Max Storico")
+                        st.markdown(f"### {res_delays_sa['ritardo_max']}")
+
+                r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
+                with r2_c1:
+                    with st.container(border=True):
+                        st.caption("Ritardo Medio")
+                        st.markdown(f"### {format_num_comma(res_delays_sa['ritardo_medio'], 2)}")
+
+                with r2_c2:
+                    with st.container(border=True):
+                        st.caption("Ciclo Max Storico")
+                        st.markdown(f"### {res_delays_sa['ciclo_max_storico']}")
+
+                with r2_c3:
+                    with st.container(border=True):
+                        st.caption("Ciclo Attuale")
+                        st.markdown(f"### {res_delays_sa['ciclo_attuale']}")
+
+                with r2_c4:
+                    with st.container(border=True):
+                        st.caption(f"MM Attuale ({finestra_ma_sa}p)")
+                        st.markdown(f"### {format_num_comma(mm_att_sa, 1)}%")
+
+                with r2_c5:
+                    with st.container(border=True):
+                        st.caption(f"MM Minima ({finestra_ma_sa}p)")
+                        st.markdown(f"### {format_num_comma(mm_min_sa, 1)}%")
+
+                with r2_c6:
+                    with st.container(border=True):
+                        st.caption(f"MM Massima ({finestra_ma_sa}p)")
+                        st.markdown(f"### {format_num_comma(mm_max_sa, 1)}%")
+
+                st.markdown("---")
+
+                if tot_match_sa >= finestra_ma_sa:
+                    chart_data = pd.DataFrame({
+                        f"Media Mobile ({finestra_ma_sa} match)": df_played_sa["MA"],
+                        "Frequenza Cumulativa": df_played_sa["FREQ_CUM_DINAMICA"],
+                    })
+                    st.line_chart(chart_data)
+
+                render_tables(
+                    df_sa_filt,
+                    quota_limite_sa,
+                    "CASA",
+                    "OSPITE",
+                    mercato=mercato_seriea_sel,
+                )
 
         elif "🔥" in modalita:
-            st.subheader(f"🔥 Strategie & Mercati in Ciclo Max da Puntare ({foglio_selezionato})")
-            st.caption(
-                "Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico"
-            )
+            st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
+            st.caption("Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico")
 
             cicli_target = []
 
