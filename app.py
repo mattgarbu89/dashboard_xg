@@ -520,12 +520,12 @@ def load_database_serie_a_df(file_bytes):
     
     target_sheet = None
     for sheet in xls.sheet_names:
-        if "DATABASE SERIE A" in sheet.upper() or "SERIE A" in sheet.upper():
+        if "DATABASE SERIE A" in sheet.upper() or "SERIE A" in sheet.upper() or "ITALIA SERIE A" in sheet.upper():
             target_sheet = sheet
             break
 
     if not target_sheet:
-        st.error("⚠️ Foglio 'DATABASE SERIE A ITALIA' non trovato nel file Excel.")
+        st.error("⚠️ Foglio 'Italia Serie A' non trovato nel file Excel.")
         return pd.DataFrame()
 
     df = pd.read_excel(xls, sheet_name=target_sheet)
@@ -1236,11 +1236,15 @@ try:
         # --- CORPO PRINCIPALE DASHBOARD ---
         if "🚨" in modalita:
             st.subheader(
-                "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion)"
+                "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion) - Database Italia Serie A"
             )
             st.caption(
-                "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica."
+                "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica basandosi sul Foglio Italia Serie A."
             )
+
+            # MODIFICA RICHIESTA: Caricamento dati direttamente dal foglio "Italia Serie A"
+            df_serie_a = load_database_serie_a_df(raw_file_bytes)
+            ranked_strategies_sa = get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE)
 
             finestra_alert = st.sidebar.slider(
                 "Finestra Media Mobile per Alert", 10, 50, 20, 5
@@ -1320,15 +1324,15 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-            for item in ranked_strategies:
+            for item in ranked_strategies_sa:
                 name = item["nome"]
                 wr_storico = item["win_rate_storico"]
                 params = item["params"]
-                df_strat = apply_filters(df_base, params)
+                df_strat = apply_filters(df_serie_a, params)
                 df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
 
                 analizza_serie_per_trend(
-                    "Strategia Salvata",
+                    "Strategia (Serie A)",
                     name,
                     params["MERCATO"],
                     df_played_strat,
@@ -1346,7 +1350,7 @@ try:
                     "MEDIA OSPITE": None,
                     "MERCATO": m,
                 }
-                df_m = apply_filters(df_base, params_m)
+                df_m = apply_filters(df_serie_a, params_m)
                 df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
                 tot_m = len(df_played_m)
                 wr_globale_m = (
@@ -1354,12 +1358,12 @@ try:
                 )
 
                 analizza_serie_per_trend(
-                    "Mercato DB Totale",
-                    f"Database Totale - {m}",
+                    "Mercato Serie A",
+                    f"Serie A Italia - {m}",
                     m,
                     df_played_m,
                     wr_globale_m,
-                    "Database Totale (Senza filtri extra)",
+                    "Database Serie A (Senza filtri extra)",
                 )
 
             # TABELLA 1: PIVOT MINIMO STORICO + RITARDO 0
@@ -1375,7 +1379,7 @@ try:
                 )
             else:
                 st.info(
-                    "Al momento nessuna strategia/mercato ha registrato una WIN nell'ultimo match esattamente al Minimo Storico."
+                    "Al momento nessuna strategia/mercato in Serie A ha registrato una WIN nell'ultimo match esattamente al Minimo Storico."
                 )
 
             st.markdown("---")
@@ -1393,7 +1397,7 @@ try:
                 )
             else:
                 st.info(
-                    "Nessun altro segnale di ripresa generico registrato."
+                    "Nessun altro segnale di ripresa generico registrato per la Serie A."
                 )
 
             st.markdown("---")
@@ -1412,7 +1416,7 @@ try:
                 )
             else:
                 st.info(
-                    "Tutte le strategie e i mercati sono stabili sopra la loro media target."
+                    "Tutte le strategie e i mercati della Serie A sono stabili sopra la loro media target."
                 )
 
         elif "📊" in modalita:
@@ -1468,7 +1472,7 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metrice Principali & Cicli di Ritardo")
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
@@ -1609,7 +1613,7 @@ try:
                 st.markdown(get_combination_string(params_tot))
 
             st.markdown(
-                f"#### 📈 Metriche Principali & Cicli di Ritardo ({titolo_sez})"
+                f"#### 📈 Metrice Principali & Cicli di Ritardo ({titolo_sez})"
             )
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
