@@ -22,7 +22,6 @@ FILE_QUOTE_LOCALE = "quote_salvate.json"
 
 TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
 
-# LISTA DESTINATARI: Tu in privato + Il canale condiviso
 TELEGRAM_DESTINATARI = [
     "1192615708",      # Chat ID Privato
     "-1004447605760"    # ID del Canale/Gruppo Telegram
@@ -33,7 +32,6 @@ TELEGRAM_DESTINATARI = [
 # GESTIONE SALVATAGGIO PERMANENTE E TELEGRAM
 # ==========================================
 def carica_quote_locali():
-    """Carica il dizionario delle quote salvate dal file JSON locale."""
     if os.path.exists(FILE_QUOTE_LOCALE):
         try:
             with open(FILE_QUOTE_LOCALE, "r", encoding="utf-8") as f:
@@ -44,7 +42,6 @@ def carica_quote_locali():
 
 
 def salva_quota_locale(chiave_match, valore_quota):
-    """Salva una singola quota all'interno del file JSON locale."""
     quote = carica_quote_locali()
     quote[chiave_match] = valore_quota
     with open(FILE_QUOTE_LOCALE, "w", encoding="utf-8") as f:
@@ -57,14 +54,12 @@ if "saved_odds" not in st.session_state:
 
 
 def escape_markdown(text):
-    """Pulisce il testo dai caratteri speciali per il Markdown di Telegram."""
     if not isinstance(text, str):
         text = str(text)
     return re.sub(r'[*_`\[\]]', '', text)
 
 
 def invia_singolo_messaggio_telegram(chat_id, testo):
-    """Invia un singolo blocco di testo tramite Telegram API."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -82,7 +77,6 @@ def invia_singolo_messaggio_telegram(chat_id, testo):
 
 
 def invia_telegram(testo):
-    """Divide i messaggi se troppo lunghi (>3500 char) e li invia a tutti i destinatari."""
     MAX_CHAR = 3500
     blocchi = []
     
@@ -125,7 +119,6 @@ def invia_telegram(testo):
 
 
 def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
-    """Calcola ed invia il resoconto sui match ESITATI con quota salvata da oggi in poi."""
     quote_salvate = carica_quote_locali()
 
     if not quote_salvate:
@@ -229,7 +222,6 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
 def genera_e_invia_report_48h_strategie(
     df_base, strategie_dict, col_casa, col_ospite
 ):
-    """Scansiona TUTTE le strategie e invia su Telegram i match delle prossime 48h."""
     adesso = datetime.now()
     limite_48h = adesso + timedelta(hours=48)
 
@@ -787,6 +779,45 @@ def calculate_delays_and_cycles(win_series):
     }
 
 
+def calcola_frequenza_cicli(win_series, ritardo_medio, nome_mercato="Mercato"):
+    """Calcola la frequenza delle sequenze consecutive di ritardi sopra la media."""
+    esiti = win_series.tolist()
+    ritardi = []
+    r_curr = 0
+
+    for e in esiti:
+        if e == 1:
+            ritardi.append(r_curr)
+            r_curr = 0
+        else:
+            r_curr += 1
+
+    sequenze = []
+    c_curr = 0
+    for r in ritardi:
+        if r > ritardo_medio:
+            c_curr += 1
+        else:
+            if c_curr >= 2:
+                sequenze.append(c_curr)
+            c_curr = 0
+
+    if c_curr >= 2:
+        sequenze.append(c_curr)
+
+    freq = {
+        "Ciclo 2": sum(1 for x in sequenze if x == 2),
+        "Consec. 3": sum(1 for x in sequenze if x == 3),
+        "Consec. 4": sum(1 for x in sequenze if x == 4),
+        "Consec. 5": sum(1 for x in sequenze if x == 5),
+        "Consec. 6": sum(1 for x in sequenze if x == 6),
+        "Consec. 7+": sum(1 for x in sequenze if x >= 7),
+    }
+
+    df_freq = pd.DataFrame([freq], index=[nome_mercato])
+    return df_freq
+
+
 def get_sorted_strategies(df_base, strategie_dict):
     ranked_strategies = []
     for name, params in strategie_dict.items():
@@ -1168,7 +1199,6 @@ try:
 
         st.sidebar.markdown("---")
 
-        # Selezione dinamica del DataFrame base a seconda della modalità scelta
         if "Serie A" in modalita:
             df_base = load_database_serie_a_df(raw_file_bytes)
         else:
@@ -1216,7 +1246,6 @@ try:
             "Colonna Squadra Ospite:", all_cols, index=idx_ospite
         )
 
-        # SEZIONE TELEGRAM BOT NELLA SIDEBAR
         st.sidebar.markdown("---")
         st.sidebar.header("📲 NOTIFICHE TELEGRAM")
         if st.sidebar.button(
@@ -1275,7 +1304,6 @@ try:
                         res_delays = calculate_delays_and_cycles(df_played["WIN"])
                         ritardo_attuale = res_delays["ritardo_attuale"]
 
-                        # 1. TABELLA SOTTOPERFORMANCE (Watchlist)
                         if mm_att < wr_target:
                             in_zona_minimo = (
                                 "🔴 SI (AL MINIMO STORICO)"
@@ -1297,7 +1325,6 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        # 2. TABELLA MINIMO STORICO + RITARDO 0 (INIZIO TREND RIALZISTA)
                         era_o_e_al_minimo = (mm_prev <= (mm_min_storica + 2.5)) or (mm_att <= (mm_min_storica + 2.5))
                         if era_o_e_al_minimo and ritardo_attuale == 0 and last_win == 1:
                             alert_minimo_ritardo_zero.append({
@@ -1313,7 +1340,6 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        # 3. TABELLA INVERSIONE GENERICA (Rimbalzi generici sotto-media)
                         elif last_win == 1 and mm_att > mm_prev and mm_att < wr_target:
                             alert_bounce_back.append({
                                 "Tipo": tipo_entita,
@@ -1326,7 +1352,6 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-            # Scansione Database Generale - Strategie
             for item in ranked_strategies_gen:
                 name = item["nome"]
                 wr_storico = item["win_rate_storico"]
@@ -1343,7 +1368,6 @@ try:
                     get_combination_string(params),
                 )
 
-            # Scansione Database Serie A - Strategie
             for item in ranked_strategies_sa:
                 name = item["nome"]
                 wr_storico = item["win_rate_storico"]
@@ -1360,7 +1384,6 @@ try:
                     get_combination_string(params),
                 )
 
-            # Scansione Mercati Totali - Database Generale
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1387,7 +1410,6 @@ try:
                     "Database Generale (Senza filtri)",
                 )
 
-            # Scansione Mercati Totali - Serie A
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1414,7 +1436,6 @@ try:
                     "Database Serie A (Senza filtri)",
                 )
 
-            # TABELLA 1: PIVOT MINIMO STORICO + RITARDO 0
             st.markdown(
                 "### 🔥 INIZIO TREND RIALZISTA (Minimo Storico Toccato + Ritardo 0)"
             )
@@ -1432,7 +1453,6 @@ try:
 
             st.markdown("---")
 
-            # TABELLA 2: ALTRI RIMBALZI DI MEDIA MOBILE
             st.markdown(
                 "### 📈 ALTRI SEGNALI DI RIPRESA (Rimbalzo sotto-media)"
             )
@@ -1450,7 +1470,6 @@ try:
 
             st.markdown("---")
 
-            # TABELLA 3: WATCHLIST SOTTOPERFORMANCE
             st.markdown(
                 "### 📉 WATCHLIST SOTTOPERFORMANCE (In Attesa del Trigger / WIN)"
             )
@@ -1548,7 +1567,8 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
+            # INTEGRAZIONE TABELLA FREQUENZA CICLI
+            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
                     st.caption("Ritardo Medio")
@@ -1568,15 +1588,29 @@ try:
 
             with r2_c4:
                 with st.container(border=True):
+                    st.caption(f"Frequenza Cicli Consecutivi ({params['MERCATO']})")
+                    if tot_match > 0:
+                        df_freq = calcola_frequenza_cicli(
+                            df_played["WIN"],
+                            res_delays["ritardo_medio"],
+                            f"Esito {params['MERCATO']}"
+                        )
+                        st.dataframe(df_freq, use_container_width=True)
+                    else:
+                        st.write("Nessun dato")
+
+            r3_c1, r3_c2, r3_c3 = st.columns(3)
+            with r3_c1:
+                with st.container(border=True):
                     st.caption(f"MM Attuale ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
-            with r2_c5:
+            with r3_c2:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
 
-            with r2_c6:
+            with r3_c3:
                 with st.container(border=True):
                     st.caption(f"MM Massima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_max, 1)}%")
@@ -1690,7 +1724,8 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6 = st.columns(6)
+            # INTEGRAZIONE TABELLA FREQUENZA CICLI PER IL MERCATO SELEZIONATO
+            r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
                     st.caption("Ritardo Medio")
@@ -1710,15 +1745,29 @@ try:
 
             with r2_c4:
                 with st.container(border=True):
+                    st.caption(f"Frequenza Cicli Consecutivi ({mercato_totale_sel})")
+                    if tot_match > 0:
+                        df_freq = calcola_frequenza_cicli(
+                            df_played["WIN"],
+                            res_delays["ritardo_medio"],
+                            f"Esito {mercato_totale_sel}"
+                        )
+                        st.dataframe(df_freq, use_container_width=True)
+                    else:
+                        st.write("Nessun dato")
+
+            r3_c1, r3_c2, r3_c3 = st.columns(3)
+            with r3_c1:
+                with st.container(border=True):
                     st.caption(f"MM Attuale ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_att, 1)}%")
 
-            with r2_c5:
+            with r3_c2:
                 with st.container(border=True):
                     st.caption(f"MM Minima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_min, 1)}%")
 
-            with r2_c6:
+            with r3_c3:
                 with st.container(border=True):
                     st.caption(f"MM Massima ({finestra_ma}p)")
                     st.markdown(f"### {format_num_comma(mm_max, 1)}%")
@@ -1754,7 +1803,6 @@ try:
             ranked_strategies_gen = get_sorted_strategies(df_generale, STRATEGIE_SALVATE)
             ranked_strategies_sa = get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE)
 
-            # 1. Strategie su Database Generale
             for item in ranked_strategies_gen:
                 name = item["nome"]
                 params = item["params"]
@@ -1786,7 +1834,6 @@ try:
                             "Filtri / Dettagli": get_combination_string(params),
                         })
 
-            # 2. Mercati Totali su Database Generale
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1827,7 +1874,6 @@ try:
                             ),
                         })
 
-            # 3. Strategie su Database Serie A
             for item in ranked_strategies_sa:
                 name = item["nome"]
                 params = item["params"]
@@ -1859,7 +1905,6 @@ try:
                             "Filtri / Dettagli": get_combination_string(params),
                         })
 
-            # 4. Mercati Totali su Database Serie A
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
