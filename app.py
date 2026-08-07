@@ -24,7 +24,7 @@ TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
 
 # LISTA DESTINATARI: Tu in privato + Il canale condiviso
 TELEGRAM_DESTINATARI = [
-    "1192615708",      # Il tuo Chat ID Privato
+    "1192615708",      # Chat ID Privato
     "-1004447605760"    # ID del Canale/Gruppo Telegram
 ]
 
@@ -57,7 +57,7 @@ if "saved_odds" not in st.session_state:
 
 
 def escape_markdown(text):
-    """Pulisce il testo dai caratteri speciali che possono causare errori nel Markdown di Telegram."""
+    """Pulisce il testo dai caratteri speciali per il Markdown di Telegram."""
     if not isinstance(text, str):
         text = str(text)
     return re.sub(r'[*_`\[\]]', '', text)
@@ -442,9 +442,9 @@ def carica_quota_con_fallback(chiave_specifica, chiave_generica):
     return 1.00, False
 
 
-def load_clean_df(file_bytes):
+def pulisci_zip_excel(file_bytes):
     output = io.BytesIO()
-    with zipfile.ZipFile(file_bytes, "r") as zin:
+    with zipfile.ZipFile(io.BytesIO(file_bytes), "r") as zin:
         with zipfile.ZipFile(output, "w") as zout:
             for item in zin.infolist():
                 buffer = zin.read(item.filename)
@@ -465,8 +465,27 @@ def load_clean_df(file_bytes):
                     buffer = re.sub(b"<filter[^>]*/>", b"", buffer)
                 zout.writestr(item, buffer)
     output.seek(0)
+    return output
 
-    df = pd.read_excel(output, sheet_name="INCROCI GEMINI", engine="openpyxl")
+
+def load_clean_df(file_bytes, sheet_target="INCROCI GEMINI"):
+    output = pulisci_zip_excel(file_bytes)
+    xls = pd.ExcelFile(output, engine="openpyxl")
+    
+    target_sheet = None
+    for sheet in xls.sheet_names:
+        if sheet_target.upper() in sheet.upper():
+            target_sheet = sheet
+            break
+
+    if not target_sheet:
+        if sheet_target == "INCROCI GEMINI":
+            target_sheet = xls.sheet_names[0]
+        else:
+            st.error(f"⚠️ Foglio '{sheet_target}' non trovato nel file Excel.")
+            return pd.DataFrame()
+
+    df = pd.read_excel(xls, sheet_name=target_sheet)
 
     cols_to_clean = [
         "SOMMA",
@@ -492,6 +511,52 @@ def load_clean_df(file_bytes):
                 df[col].astype(str).str.replace("00:00:00", "").str.strip()
             )
 
+    return df
+
+
+def load_database_serie_a_df(file_bytes):
+    output = pulisci_zip_excel(file_bytes)
+    xls = pd.ExcelFile(output, engine="openpyxl")
+    
+    target_sheet = None
+    for sheet in xls.sheet_names:
+        if "DATABASE SERIE A" in sheet.upper() or "SERIE A" in sheet.upper():
+            target_sheet = sheet
+            break
+
+    if not target_sheet:
+        st.error("⚠️ Foglio 'DATABASE SERIE A ITALIA' non trovato nel file Excel.")
+        return pd.DataFrame()
+
+    df = pd.read_excel(xls, sheet_name=target_sheet)
+
+    mappatura_colonne = {
+        "Date": "data",
+        "DATE": "data",
+        "DATA": "data",
+        "HomeTeam": "SQUADRA CASA",
+        "HOMETEAM": "SQUADRA CASA",
+        "AwayTeam": "SQUADRA OSPITE",
+        "AWAYTEAM": "SQUADRA OSPITE",
+        "FTHG": "GOL CASA",
+        "FTAG": "GOL OSPITE",
+        "HTHG": "GOL CASA HT",
+        "HTAG": "GOL OSPITE HT",
+        "FTR": "ESITO FINALE",
+        "HTR": "ESITO HT"
+    }
+    
+    df.rename(columns=mappatura_colonne, inplace=True)
+
+    if "data" in df.columns:
+        df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.strftime("%d/%m/%Y")
+    
+    num_cols = ["GOL CASA", "GOL OSPITE", "GOL CASA HT", "GOL OSPITE HT"]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = clean_numeric_column(df[col])
+
+    df["CAMPIONATO"] = "Serie A Italia"
     return df
 
 
@@ -955,19 +1020,18 @@ direct_url = get_drive_direct_url(LINK_GOOGLE_DRIVE)
 
 
 @st.cache_data(ttl=300)
-def fetch_data_from_drive(url):
+def fetch_raw_file_from_drive(url):
     response = requests.get(url)
     if response.status_code == 200:
-        return load_clean_df(io.BytesIO(response.content))
+        return response.content
     return None
 
 
 try:
     with st.spinner("Lettura dati da Google Drive..."):
-        df_raw = fetch_data_from_drive(direct_url)
+        raw_file_bytes = fetch_raw_file_from_drive(direct_url)
 
-    if df_raw is not None:
-        df_base = df_raw.copy()
+    if raw_file_bytes is not None:
 
         STRATEGIE_SALVATE = {
             "Esito X super combo 235 match 37.45%": {
@@ -1064,9 +1128,6 @@ try:
             },
         }
 
-        ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
-        strat_map = {item["nome"]: item for item in ranked_strategies}
-
         MERCATI_TOTALI = [
             "1",
             "X",
@@ -1100,18 +1161,29 @@ try:
                 "🚨 Panoramica Strategie & Trend",
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
+                "📂 Database Italia Serie A",
                 "🔥 Cicli Max da Puntare",
             ],
         )
 
         st.sidebar.markdown("---")
+
+        # Selezione dinamica del DataFrame base a seconda della modalità scelta
+        if "Serie A" in modalita:
+            df_base = load_database_serie_a_df(raw_file_bytes)
+        else:
+            df_base = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+
+        ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
+        strat_map = {item["nome"]: item for item in ranked_strategies}
+
         if "📊" in modalita:
             st.sidebar.header("🎯 SELEZIONA STRATEGIA")
             strat_nome = st.sidebar.selectbox(
                 "Strategia attiva:", list(strat_map.keys())
             )
             st.sidebar.markdown("---")
-        elif "📂" in modalita:
+        elif "📂 Database Totale" in modalita:
             st.sidebar.header("🎯 SELEZIONA MERCATO TOTALE")
             mercato_totale_sel = st.sidebar.selectbox(
                 "Mercato da analizzare:", MERCATI_TOTALI
@@ -1396,7 +1468,7 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metmetriche Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
@@ -1474,7 +1546,7 @@ try:
                 mercato=params["MERCATO"],
             )
 
-        elif "📂" in modalita:
+        elif "📂 Database Totale" in modalita:
             st.subheader(
                 f"📂 Analisi Database Totale — Mercato: `{mercato_totale_sel}`"
             )
@@ -1614,6 +1686,31 @@ try:
                 col_ospite,
                 mercato=mercato_totale_sel,
             )
+
+        elif "📂 Database Italia Serie A" in modalita:
+            st.subheader("📂 Database Italia Serie A")
+            
+            if not df_base.empty:
+                st.success(f"Caricate con successo {len(df_base)} partite della Serie A Italia!")
+                
+                squadre = sorted(
+                    list(
+                        set(df_base["SQUADRA CASA"].dropna().unique()).union(
+                            set(df_base["SQUADRA OSPITE"].dropna().unique())
+                        )
+                    )
+                )
+                
+                squadra_sel = st.selectbox("Filtra per Squadra:", ["Tutte"] + squadre)
+                
+                df_display = df_base.copy()
+                if squadra_sel != "Tutte":
+                    df_display = df_display[
+                        (df_display["SQUADRA CASA"] == squadra_sel)
+                        | (df_display["SQUADRA OSPITE"] == squadra_sel)
+                    ]
+                
+                st.dataframe(df_display, use_container_width=True)
 
         elif "🔥" in modalita:
             st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
