@@ -314,6 +314,7 @@ def genera_e_invia_report_48h_strategie(
 
         s_clean = escape_markdown(strat_nome)
         messaggio += f"📌 *STRATEGIA:* `{s_clean}`\n"
+        messaggio += f"🎯 *Esito Mercato:* `{m_strat}`\n"
         messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
 
         for idx, row in df_m.iterrows():
@@ -331,14 +332,15 @@ def genera_e_invia_report_48h_strategie(
                 else "N/D"
             )
 
-            # Salviamo la partita per il riepilogo unico in fondo
-            partite_uniche.add(f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`)")
+            # AGGIORNATO: Inclusione esito nel riepilogo
+            partite_uniche.add(f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`) 🎯 **Esito: {m_strat}**")
 
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
 
             messaggio += f"⚽ *{casa_clean} - {ospite_clean}*\n"
             messaggio += f"🕐 *Orario:* `{dt_str}`\n"
+            messaggio += f"🎯 *Esito:* `{m_strat}`\n"
 
             if quota_inserita and float(quota_inserita) > 1.0:
                 q_val = float(quota_inserita)
@@ -794,7 +796,6 @@ def calculate_delays_and_cycles(win_series):
 
 
 def calcola_frequenza_cicli(win_series, ritardo_medio, nome_mercato="Mercato"):
-    """Calcola la frequenza delle sequenze consecutive di ritardi sopra la media."""
     esiti = win_series.tolist()
     ritardi = []
     r_curr = 0
@@ -1581,7 +1582,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # INTEGRAZIONE TABELLA FREQUENZA CICLI
             r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
@@ -1738,7 +1738,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # INTEGRAZIONE TABELLA FREQUENZA CICLI PER IL MERCATO SELEZIONATO
             r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
