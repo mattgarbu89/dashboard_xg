@@ -60,7 +60,6 @@ def escape_markdown(text):
     """Pulisce il testo dai caratteri speciali che possono causare errori nel Markdown di Telegram."""
     if not isinstance(text, str):
         text = str(text)
-    # Rimuove i caratteri che rompono la formattazione
     return re.sub(r'[*_`\[\]]', '', text)
 
 
@@ -84,7 +83,6 @@ def invia_singolo_messaggio_telegram(chat_id, testo):
 
 def invia_telegram(testo):
     """Divide i messaggi se troppo lunghi (>3500 char) e li invia a tutti i destinatari."""
-    # Splitta il testo in blocchi per evitare il limite di 4096 caratteri di Telegram
     MAX_CHAR = 3500
     blocchi = []
     
@@ -109,7 +107,6 @@ def invia_telegram(testo):
         for i, blocco in enumerate(blocchi):
             ok, err_msg = invia_singolo_messaggio_telegram(chat_id, blocco)
             if not ok:
-                # Prova fallback senza Markdown se c'è un errore di formattazione
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                 payload = {"chat_id": chat_id, "text": blocco}
                 try:
@@ -1177,7 +1174,9 @@ try:
                 "Finestra Media Mobile per Alert", 10, 50, 20, 5
             )
 
-            alert_underperforming, alert_bounce_back = [], []
+            alert_underperforming = []
+            alert_bounce_back = []
+            alert_minimo_ritardo_zero = []
 
             def analizza_serie_per_trend(
                 tipo_entita, nome_entita, mercato_entita, df_played, wr_target, dettagli_str
@@ -1193,9 +1192,12 @@ try:
                         mm_prev = ma_series.iloc[-2]
                         mm_min_storica = ma_series.min()
                         scostamento_da_media = mm_att - wr_target
-                        distanza_da_minimo = mm_att - mm_min_storica
                         last_win = df_played["WIN"].iloc[-1]
 
+                        res_delays = calculate_delays_and_cycles(df_played["WIN"])
+                        ritardo_attuale = res_delays["ritardo_attuale"]
+
+                        # 1. TABELLA SOTTOPERFORMANCE (Watchlist)
                         if mm_att < wr_target:
                             in_zona_minimo = (
                                 "🔴 SI (AL MINIMO STORICO)"
@@ -1207,35 +1209,44 @@ try:
                                 "Tipo": tipo_entita,
                                 "Nome / Mercato": nome_entita,
                                 "Mercato": mercato_entita,
+                                "Ritardo Att.": ritardo_attuale,
                                 "Match Giocati": tot,
-                                "WR Storico Target": f"{format_num_comma(wr_target)}%",
+                                "WR Target": f"{format_num_comma(wr_target)}%",
                                 f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
-                                "MM Minima Storica": f"{format_num_comma(mm_min_storica, 1)}%",
+                                "MM Minima": f"{format_num_comma(mm_min_storica, 1)}%",
                                 "Distanza da Media": f"{format_num_comma(scostamento_da_media, 1)}%",
-                                "Vicino al Minimo": in_zona_minimo,
-                                "Filtri / Dettagli": dettagli_str,
+                                "Al Minimo Storico": in_zona_minimo,
+                                "Filtri": dettagli_str,
                             })
 
-                            if last_win == 1 and mm_att > mm_prev:
-                                rimbalzo_val = mm_att - mm_prev
-                                era_in_minimo = (
-                                    "🔥 RIMBALZO DA MINIMO STORICO"
-                                    if mm_prev <= (mm_min_storica + 3.0)
-                                    else "📈 RIENTRO IN TREND"
-                                )
+                        # 2. TABELLA MINIMO STORICO + RITARDO 0 (INIZIO TREND RIALZISTA)
+                        era_o_e_al_minimo = (mm_prev <= (mm_min_storica + 2.5)) or (mm_att <= (mm_min_storica + 2.5))
+                        if era_o_e_al_minimo and ritardo_attuale == 0 and last_win == 1:
+                            alert_minimo_ritardo_zero.append({
+                                "Tipo": tipo_entita,
+                                "Nome / Mercato": nome_entita,
+                                "Mercato": mercato_entita,
+                                "Stato Trigger": "🔥 PIVOT INVERSIONE (WIN AL MINIMO)",
+                                "WR Target": f"{format_num_comma(wr_target)}%",
+                                f"MM Prec ({finestra_alert}p)": f"{format_num_comma(mm_prev, 1)}%",
+                                f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
+                                "MM Minima": f"{format_num_comma(mm_min_storica, 1)}%",
+                                "Rimbalzo Match": f"+{format_num_comma(mm_att - mm_prev, 1)}%",
+                                "Filtri": dettagli_str,
+                            })
 
-                                alert_bounce_back.append({
-                                    "Tipo": tipo_entita,
-                                    "Nome / Mercato": nome_entita,
-                                    "Mercato": mercato_entita,
-                                    "Stato Inversione": era_in_minimo,
-                                    "WR Storico Target": f"{format_num_comma(wr_target)}%",
-                                    f"MM Prec ({finestra_alert}p)": f"{format_num_comma(mm_prev, 1)}%",
-                                    f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
-                                    "Rimbalzo Ultimo Match": f"+{format_num_comma(rimbalzo_val, 1)}%",
-                                    "MM Minima Registrata": f"{format_num_comma(mm_min_storica, 1)}%",
-                                    "Filtri / Dettagli": dettagli_str,
-                                })
+                        # 3. TABELLA INVERSIONE GENERICA (Rimbalzi generici sotto-media)
+                        elif last_win == 1 and mm_att > mm_prev and mm_att < wr_target:
+                            alert_bounce_back.append({
+                                "Tipo": tipo_entita,
+                                "Nome / Mercato": nome_entita,
+                                "Mercato": mercato_entita,
+                                "WR Target": f"{format_num_comma(wr_target)}%",
+                                f"MM Prec ({finestra_alert}p)": f"{format_num_comma(mm_prev, 1)}%",
+                                f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
+                                "Rimbalzo Match": f"+{format_num_comma(mm_att - mm_prev, 1)}%",
+                                "Filtri": dettagli_str,
+                            })
 
             for item in ranked_strategies:
                 name = item["nome"]
@@ -1279,11 +1290,30 @@ try:
                     "Database Totale (Senza filtri extra)",
                 )
 
+            # TABELLA 1: PIVOT MINIMO STORICO + RITARDO 0
             st.markdown(
-                "### 🚀 SEGNALI DI INVERSIONE TREND (Punto di Inizio Investimento)"
+                "### 🔥 INIZIO TREND RIALZISTA (Minimo Storico Toccato + Ritardo 0)"
             )
             st.caption(
-                "Questi mercati erano in forte sottoperformance/al minimo storico e hanno registrato una WIN nell'ultimo match, avviando il ciclo rialzista verso la media."
+                "🎯 **I MIGLIORI INGRESSI:** Strategie o Mercati che hanno toccato il loro minimo storico di Media Mobile e nell'ultima partita hanno fatto WIN (Ritardo 0). Rappresenta il punto esatto di svolta."
+            )
+            if alert_minimo_ritardo_zero:
+                st.dataframe(
+                    pd.DataFrame(alert_minimo_ritardo_zero), use_container_width=True
+                )
+            else:
+                st.info(
+                    "Al momento nessuna strategia/mercato ha registrato una WIN nell'ultimo match esattamente al Minimo Storico."
+                )
+
+            st.markdown("---")
+
+            # TABELLA 2: ALTRI RIMBALZI DI MEDIA MOBILE
+            st.markdown(
+                "### 📈 ALTRI SEGNALI DI RIPRESA (Rimbalzo sotto-media)"
+            )
+            st.caption(
+                "Mercati sotto la media storica che hanno registrato una WIN nell'ultimo match, ma non erano al loro minimo storico assoluto."
             )
             if alert_bounce_back:
                 st.dataframe(
@@ -1291,16 +1321,17 @@ try:
                 )
             else:
                 st.info(
-                    "Nessun segnale di inversione attivo registrato nell'ultima giornata."
+                    "Nessun altro segnale di ripresa generico registrato."
                 )
 
             st.markdown("---")
 
+            # TABELLA 3: WATCHLIST SOTTOPERFORMANCE
             st.markdown(
-                "### 📉 MERCATI E STRATEGIE IN SOTTOPERFORMANCE (In Attesa del Minimo / Trigger)"
+                "### 📉 WATCHLIST SOTTOPERFORMANCE (In Attesa del Trigger / WIN)"
             )
             st.caption(
-                "Elenco dei mercati attualmente sotto la media storica. Da monitorare per attendere il primo segnale WIN di inversione."
+                "Elenco dei mercati attualmente sotto la media storica. Attendi che facciano una WIN (passando nella prima tabella in alto) prima di puntarli."
             )
             if alert_underperforming:
                 st.dataframe(
