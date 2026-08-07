@@ -139,6 +139,8 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
 
     for strat_nome, params in strategie_dict.items():
         df_strat = apply_filters(df_base, params)
+        if "GOL CASA" not in df_strat.columns or "WIN" not in df_strat.columns:
+            continue
         df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
 
         vinte_strat = 0
@@ -223,6 +225,9 @@ def genera_e_invia_report_48h_strategie(df_base, strategie_dict, col_casa, col_o
 
     for strat_nome, params in strategie_dict.items():
         df_strat = apply_filters(df_base, params)
+        if "GOL CASA" not in df_strat.columns or "WIN" not in df_strat.columns:
+            continue
+            
         df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
         tot_match_strat = len(df_played)
 
@@ -366,8 +371,8 @@ def format_num_comma(val, decimals=2):
 
 
 def get_clean_team_names(row, col_casa, col_ospite):
-    val_casa = str(row.get(col_casa, "")).strip()
-    val_ospite = str(row.get(col_ospite, "")).strip()
+    val_casa = str(row.get(col_casa, "")).strip() if col_casa in row else ""
+    val_ospite = str(row.get(col_ospite, "")).strip() if col_ospite in row else ""
 
     regex_separatori = r"\s+(?:vs|v|-)\s+"
 
@@ -414,7 +419,7 @@ def carica_quota_con_fallback(chiave_specifica, chiave_generica):
 
 
 def load_clean_df_from_drive(file_bytes, sheet_name="INCROCI GEMINI"):
-    """Estrae ed analizza lo specifico foglio dal file di Google Drive."""
+    """Estrae ed analizza lo specifico foglio dal file di Google Drive con mappatura automatica colonne."""
     output = io.BytesIO()
     with zipfile.ZipFile(file_bytes, "r") as zin:
         with zipfile.ZipFile(output, "w") as zout:
@@ -431,25 +436,50 @@ def load_clean_df_from_drive(file_bytes, sheet_name="INCROCI GEMINI"):
     try:
         df = pd.read_excel(output, sheet_name=sheet_name, engine="openpyxl")
     except Exception:
-        # Fallback al primo foglio se il nome del foglio non corrisponde
         excel_file = pd.ExcelFile(output, engine="openpyxl")
         sheet_target = sheet_name if sheet_name in excel_file.sheet_names else excel_file.sheet_names[0]
         df = pd.read_excel(excel_file, sheet_name=sheet_target)
 
-    cols_to_clean = [
-        "SOMMA",
-        "DC",
-        "C1",
-        "C2",
-        "MEDIA CASA",
-        "MEDIA OSPITE",
-        "GOL CASA",
-        "GOL OSPITE",
-    ]
+    # 1. Pulizia generica nomi colonne (rimuove spazi vuoti)
+    df.columns = df.columns.astype(str).str.strip()
+
+    # 2. Mappatura intelligente dei nomi colonna per evitare KeyError
+    mappa_colonne = {}
+    for col in df.columns:
+        c_upper = str(col).upper().strip().replace("_", " ")
+        if c_upper in ["GOL CASA", "GOL C", "GOAL CASA", "GC", "GOALS CASA"]:
+            mappa_colonne[col] = "GOL CASA"
+        elif c_upper in ["GOL OSPITE", "GOL O", "GOAL OSPITE", "GOAL TRASFERTA", "GOAL A", "GOALS OSPITE", "GOALS TRASFERTA"]:
+            mappa_colonne[col] = "GOL OSPITE"
+        elif c_upper in ["SOMMA", "SUM"]:
+            mappa_colonne[col] = "SOMMA"
+        elif c_upper in ["DC", "DIFF C"]:
+            mappa_colonne[col] = "DC"
+        elif c_upper in ["C1", "CASA 1"]:
+            mappa_colonne[col] = "C1"
+        elif c_upper in ["C2", "CASA 2", "OSPITE 2"]:
+            mappa_colonne[col] = "C2"
+        elif c_upper in ["MEDIA CASA", "MEDIA C"]:
+            mappa_colonne[col] = "MEDIA CASA"
+        elif c_upper in ["MEDIA OSPITE", "MEDIA O", "MEDIA TRASFERTA"]:
+            mappa_colonne[col] = "MEDIA OSPITE"
+
+    if mappa_colonne:
+        df = df.rename(columns=mappa_colonne)
+
+    # 3. Assicura che le colonne standard esistano sempre
+    colonne_richieste = ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE", "GOL CASA", "GOL OSPITE"]
+    for col_req in colonne_richieste:
+        if col_req not in df.columns:
+            df[col_req] = pd.NA
+
+    # 4. Pulizia valori numerici
+    cols_to_clean = ["SOMMA", "DC", "C1", "C2", "MEDIA CASA", "MEDIA OSPITE", "GOL CASA", "GOL OSPITE"]
     for col in cols_to_clean:
         if col in df.columns:
             df[col] = clean_numeric_column(df[col])
 
+    # 5. Pulizia Date ed Orari
     for col in df.columns:
         if "DATA" in str(col).upper():
             df[col] = (
@@ -536,7 +566,7 @@ def detect_team_columns(df):
 
 
 def evaluate_market(row, market):
-    if pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
+    if "GOL CASA" not in row or "GOL OSPITE" not in row or pd.isna(row["GOL CASA"]) or pd.isna(row["GOL OSPITE"]):
         return None
 
     gc = float(row["GOL CASA"])
@@ -628,7 +658,7 @@ def apply_filters(df, params):
 
 
 def calculate_delays_and_cycles(win_series):
-    esiti = win_series.tolist()
+    esiti = win_series.dropna().tolist()
     ritardi_conclusi = []
     ritardo_corrente = 0
 
@@ -678,23 +708,24 @@ def get_sorted_strategies(df_base, strategie_dict):
     ranked_strategies = []
     for name, params in strategie_dict.items():
         df_strat = apply_filters(df_base, params)
-        df_strat_played = df_strat[df_strat["GOL CASA"].notna()].copy()
-        tot = len(df_strat_played)
-        win_rate_reale = (
-            (df_strat_played["WIN"].sum() / tot * 100) if tot > 0 else 0.0
-        )
+        if "GOL CASA" in df_strat.columns and "WIN" in df_strat.columns:
+            df_strat_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+            tot = len(df_strat_played)
+            win_rate_reale = (
+                (df_strat_played["WIN"].sum() / tot * 100) if tot > 0 else 0.0
+            )
 
-        match = re.search(r"(\d+[\.,]?\d*)%", name)
-        win_rate_storico = (
-            float(match.group(1).replace(",", ".")) if match else win_rate_reale
-        )
+            match = re.search(r"(\d+[\.,]?\d*)%", name)
+            win_rate_storico = (
+                float(match.group(1).replace(",", ".")) if match else win_rate_reale
+            )
 
-        ranked_strategies.append({
-            "nome": name,
-            "win_rate_storico": win_rate_storico,
-            "win_rate_reale": win_rate_reale,
-            "params": params,
-        })
+            ranked_strategies.append({
+                "nome": name,
+                "win_rate_storico": win_rate_storico,
+                "win_rate_reale": win_rate_reale,
+                "params": params,
+            })
 
     ranked_strategies.sort(key=lambda x: x["win_rate_reale"], reverse=True)
     return ranked_strategies
@@ -1217,16 +1248,17 @@ try:
                 wr_storico = item["win_rate_storico"]
                 params = item["params"]
                 df_strat = apply_filters(df_base, params)
-                df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
+                if "GOL CASA" in df_strat.columns:
+                    df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
 
-                analizza_serie_per_trend(
-                    "Strategia Salvata",
-                    name,
-                    params["MERCATO"],
-                    df_played_strat,
-                    wr_storico,
-                    get_combination_string(params),
-                )
+                    analizza_serie_per_trend(
+                        "Strategia Salvata",
+                        name,
+                        params["MERCATO"],
+                        df_played_strat,
+                        wr_storico,
+                        get_combination_string(params),
+                    )
 
             for m in MERCATI_TOTALI:
                 params_m = {
@@ -1239,20 +1271,21 @@ try:
                     "MERCATO": m,
                 }
                 df_m = apply_filters(df_base, params_m)
-                df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
-                tot_m = len(df_played_m)
-                wr_globale_m = (
-                    (df_played_m["WIN"].sum() / tot_m * 100) if tot_m > 0 else 0
-                )
+                if "GOL CASA" in df_m.columns:
+                    df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+                    tot_m = len(df_played_m)
+                    wr_globale_m = (
+                        (df_played_m["WIN"].sum() / tot_m * 100) if tot_m > 0 else 0
+                    )
 
-                analizza_serie_per_trend(
-                    "Mercato DB Totale",
-                    f"Database Totale - {m}",
-                    m,
-                    df_played_m,
-                    wr_globale_m,
-                    "Database Totale (Senza filtri extra)",
-                )
+                    analizza_serie_per_trend(
+                        "Mercato DB Totale",
+                        f"Database Totale - {m}",
+                        m,
+                        df_played_m,
+                        wr_globale_m,
+                        "Database Totale (Senza filtri extra)",
+                    )
 
             st.markdown(
                 "### 🔥 INIZIO TREND RIALZISTA (Minimo Storico Toccato + Ritardo 0)"
@@ -1308,7 +1341,7 @@ try:
             win_rate_storico = strat_info["win_rate_storico"]
 
             df_strat = apply_filters(df_base, params)
-            df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+            df_played = df_strat[df_strat["GOL CASA"].notna()].copy() if "GOL CASA" in df_strat.columns else pd.DataFrame()
             tot_match = len(df_played)
 
             win_rate_reale = (
@@ -1320,7 +1353,7 @@ try:
 
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
-                if tot_match > 0
+                if tot_match > 0 and "WIN" in df_played.columns
                 else {
                     "ritardo_attuale": 0,
                     "ritardo_max": 0,
@@ -1336,7 +1369,7 @@ try:
             )
 
             mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
-            if tot_match >= finestra_ma:
+            if tot_match >= finestra_ma and "WIN" in df_played.columns:
                 df_played["MA"] = (
                     df_played["WIN"].rolling(window=finestra_ma).mean() * 100
                 )
@@ -1418,7 +1451,7 @@ try:
 
             st.markdown("---")
 
-            if tot_match >= finestra_ma:
+            if tot_match >= finestra_ma and "MA" in df_played.columns:
                 chart_data = pd.DataFrame({
                     f"Media Mobile ({finestra_ma} match)": df_played["MA"],
                     "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
@@ -1449,7 +1482,7 @@ try:
             }
 
             df_tot = apply_filters(df_base, params_tot)
-            df_played = df_tot[df_tot["GOL CASA"].notna()].copy()
+            df_played = df_tot[df_tot["GOL CASA"].notna()].copy() if "GOL CASA" in df_tot.columns else pd.DataFrame()
             tot_match = len(df_played)
 
             win_rate_reale = (
@@ -1461,7 +1494,7 @@ try:
 
             res_delays = (
                 calculate_delays_and_cycles(df_played["WIN"])
-                if tot_match > 0
+                if tot_match > 0 and "WIN" in df_played.columns
                 else {
                     "ritardo_attuale": 0,
                     "ritardo_max": 0,
@@ -1477,7 +1510,7 @@ try:
             )
 
             mm_att, mm_min, mm_max = 0.0, 0.0, 0.0
-            if tot_match >= finestra_ma:
+            if tot_match >= finestra_ma and "WIN" in df_played.columns:
                 df_played["MA"] = (
                     df_played["WIN"].rolling(window=finestra_ma).mean() * 100
                 )
@@ -1559,7 +1592,7 @@ try:
 
             st.markdown("---")
 
-            if tot_match >= finestra_ma:
+            if tot_match >= finestra_ma and "MA" in df_played.columns:
                 chart_data = pd.DataFrame({
                     f"Media Mobile ({finestra_ma} match)": df_played["MA"],
                     "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
@@ -1586,32 +1619,33 @@ try:
                 name = item["nome"]
                 params = item["params"]
                 df_strat = apply_filters(df_base, params)
-                df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
+                if "GOL CASA" in df_strat.columns and "WIN" in df_strat.columns:
+                    df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
 
-                if len(df_played) > 0:
-                    delays = calculate_delays_and_cycles(df_played["WIN"])
-                    c_att = delays["ciclo_attuale"]
-                    c_max = delays["ciclo_max_storico"]
+                    if len(df_played) > 0:
+                        delays = calculate_delays_and_cycles(df_played["WIN"])
+                        c_att = delays["ciclo_attuale"]
+                        c_max = delays["ciclo_max_storico"]
 
-                    if c_att >= c_max and c_max > 0:
-                        tot = len(df_played)
-                        wr = df_played["WIN"].sum() / tot * 100
-                        q_fair = (100 / wr) if wr > 0 else 0.0
+                        if c_att >= c_max and c_max > 0:
+                            tot = len(df_played)
+                            wr = df_played["WIN"].sum() / tot * 100
+                            q_fair = (100 / wr) if wr > 0 else 0.0
 
-                        cicli_target.append({
-                            "Tipo": "Strategia Salvata",
-                            "Nome / Mercato": name,
-                            "Mercato Specifico": params["MERCATO"],
-                            "Ciclo Attuale": c_att,
-                            "Ciclo Max Storico": c_max,
-                            "Ritardo Medio": format_num_comma(
-                                delays["ritardo_medio"], 2
-                            ),
-                            "Win Rate Reale": f"{format_num_comma(wr)}%",
-                            "Quota Fair": format_num_comma(q_fair),
-                            "Match Giocati": tot,
-                            "Filtri / Dettagli": get_combination_string(params),
-                        })
+                            cicli_target.append({
+                                "Tipo": "Strategia Salvata",
+                                "Nome / Mercato": name,
+                                "Mercato Specifico": params["MERCATO"],
+                                "Ciclo Attuale": c_att,
+                                "Ciclo Max Storico": c_max,
+                                "Ritardo Medio": format_num_comma(
+                                    delays["ritardo_medio"], 2
+                                ),
+                                "Win Rate Reale": f"{format_num_comma(wr)}%",
+                                "Quota Fair": format_num_comma(q_fair),
+                                "Match Giocati": tot,
+                                "Filtri / Dettagli": get_combination_string(params),
+                            })
 
             for m in MERCATI_TOTALI:
                 params_m = {
@@ -1624,34 +1658,35 @@ try:
                     "MERCATO": m,
                 }
                 df_m = apply_filters(df_base, params_m)
-                df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+                if "GOL CASA" in df_m.columns and "WIN" in df_m.columns:
+                    df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
 
-                if len(df_played_m) > 0:
-                    delays_m = calculate_delays_and_cycles(df_played_m["WIN"])
-                    c_att_m = delays_m["ciclo_attuale"]
-                    c_max_m = delays_m["ciclo_max_storico"]
+                    if len(df_played_m) > 0:
+                        delays_m = calculate_delays_and_cycles(df_played_m["WIN"])
+                        c_att_m = delays_m["ciclo_attuale"]
+                        c_max_m = delays_m["ciclo_max_storico"]
 
-                    if c_att_m >= c_max_m and c_max_m > 0:
-                        tot_m = len(df_played_m)
-                        wr_m = df_played_m["WIN"].sum() / tot_m * 100
-                        q_fair_m = (100 / wr_m) if wr_m > 0 else 0.0
+                        if c_att_m >= c_max_m and c_max_m > 0:
+                            tot_m = len(df_played_m)
+                            wr_m = df_played_m["WIN"].sum() / tot_m * 100
+                            q_fair_m = (100 / wr_m) if wr_m > 0 else 0.0
 
-                        cicli_target.append({
-                            "Tipo": "Mercato Totale",
-                            "Nome / Mercato": f"Database Totale - {m}",
-                            "Mercato Specifico": m,
-                            "Ciclo Attuale": c_att_m,
-                            "Ciclo Max Storico": c_max_m,
-                            "Ritardo Medio": format_num_comma(
-                                delays_m["ritardo_medio"], 2
-                            ),
-                            "Win Rate Reale": f"{format_num_comma(wr_m)}%",
-                            "Quota Fair": format_num_comma(q_fair_m),
-                            "Match Giocati": tot_m,
-                            "Filtri / Dettagli": (
-                                "Database Totale (Senza filtri extra)"
-                            ),
-                        })
+                            cicli_target.append({
+                                "Tipo": "Mercato Totale",
+                                "Nome / Mercato": f"Database Totale - {m}",
+                                "Mercato Specifico": m,
+                                "Ciclo Attuale": c_att_m,
+                                "Ciclo Max Storico": c_max_m,
+                                "Ritardo Medio": format_num_comma(
+                                    delays_m["ritardo_medio"], 2
+                                ),
+                                "Win Rate Reale": f"{format_num_comma(wr_m)}%",
+                                "Quota Fair": format_num_comma(q_fair_m),
+                                "Match Giocati": tot_m,
+                                "Filtri / Dettagli": (
+                                    "Database Totale (Senza filtri extra)"
+                                ),
+                            })
 
             if cicli_target:
                 df_cicli_res = pd.DataFrame(cicli_target)
