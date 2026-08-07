@@ -227,6 +227,8 @@ def genera_e_invia_report_48h_strategie(
 
     report_strats = {}
     totale_match_trovati = 0
+    # Set per raccogliere le partite uniche evitando doppioni
+    partite_uniche = set()
 
     for strat_nome, params in strategie_dict.items():
         df_strat = apply_filters(df_base, params)
@@ -329,6 +331,9 @@ def genera_e_invia_report_48h_strategie(
                 else "N/D"
             )
 
+            # Salviamo la partita per il riepilogo unico in fondo
+            partite_uniche.add(f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`)")
+
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
 
@@ -352,6 +357,15 @@ def genera_e_invia_report_48h_strategie(
 
             messaggio += "----------------------------------\n"
         messaggio += "\n"
+
+    # ==========================================
+    # SEZIONE RIEPILOGO PARTITE UNICHE SUL BOOK
+    # ==========================================
+    messaggio += "==================================\n"
+    messaggio += "📌 *PARTITE DA PIAZZARE SUL BOOK (UNIVOCHE)*\n"
+    messaggio += "==================================\n"
+    for match_str in sorted(partite_uniche):
+        messaggio += f"{match_str}\n"
 
     ok = invia_telegram(messaggio)
     if ok:
