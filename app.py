@@ -780,7 +780,10 @@ def calculate_delays_and_cycles(win_series):
 
 
 def calcola_frequenza_cicli(win_series, ritardo_medio, nome_mercato="Mercato"):
-    """Calcola la frequenza delle sequenze consecutive di ritardi sopra la media."""
+    """
+    Calcola la frequenza delle sequenze consecutive di ritardi sopra la media
+    includendo il Ciclo 1 e mostrato con il valore in alto e la percentuale sotto.
+    """
     esiti = win_series.tolist()
     ritardi = []
     r_curr = 0
@@ -798,20 +801,37 @@ def calcola_frequenza_cicli(win_series, ritardo_medio, nome_mercato="Mercato"):
         if r > ritardo_medio:
             c_curr += 1
         else:
-            if c_curr >= 2:
+            if c_curr >= 1:
                 sequenze.append(c_curr)
             c_curr = 0
 
-    if c_curr >= 2:
+    if c_curr >= 1:
         sequenze.append(c_curr)
 
+    totale_sequenze = len(sequenze)
+
+    c1 = sum(1 for x in sequenze if x == 1)
+    c2 = sum(1 for x in sequenze if x == 2)
+    c3 = sum(1 for x in sequenze if x == 3)
+    c4 = sum(1 for x in sequenze if x == 4)
+    c5 = sum(1 for x in sequenze if x == 5)
+    c6 = sum(1 for x in sequenze if x == 6)
+    c7 = sum(1 for x in sequenze if x >= 7)
+
+    def formatta_valore(conteggio):
+        if totale_sequenze == 0:
+            return "0\n(0,0%)"
+        pct = (conteggio / totale_sequenze) * 100
+        return f"{conteggio}\n({pct:.1f}%)".replace(".", ",")
+
     freq = {
-        "Ciclo 2": sum(1 for x in sequenze if x == 2),
-        "Consec. 3": sum(1 for x in sequenze if x == 3),
-        "Consec. 4": sum(1 for x in sequenze if x == 4),
-        "Consec. 5": sum(1 for x in sequenze if x == 5),
-        "Consec. 6": sum(1 for x in sequenze if x == 6),
-        "Consec. 7+": sum(1 for x in sequenze if x >= 7),
+        "Ciclo 1": formatta_valore(c1),
+        "Ciclo 2": formatta_valore(c2),
+        "Consec. 3": formatta_valore(c3),
+        "Consec. 4": formatta_valore(c4),
+        "Consec. 5": formatta_valore(c5),
+        "Consec. 6": formatta_valore(c6),
+        "Consec. 7+": formatta_valore(c7),
     }
 
     df_freq = pd.DataFrame([freq], index=[nome_mercato])
@@ -1567,7 +1587,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # INTEGRAZIONE TABELLA FREQUENZA CICLI
             r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
@@ -1724,7 +1743,6 @@ try:
                     st.caption("Ritardo Max Storico")
                     st.markdown(f"### {res_delays['ritardo_max']}")
 
-            # INTEGRAZIONE TABELLA FREQUENZA CICLI PER IL MERCATO SELEZIONATO
             r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1, 1, 3.5])
             with r2_c1:
                 with st.container(border=True):
