@@ -46,6 +46,10 @@ def salva_quota_locale(chiave_match, valore_quota):
     quote[chiave_match] = valore_quota
     with open(FILE_QUOTE_LOCALE, "w", encoding="utf-8") as f:
         json.dump(quote, f, indent=4, ensure_ascii=False)
+    
+    # Aggiornamento dello state locale
+    if "saved_odds" not in st.session_state:
+        st.session_state["saved_odds"] = {}
     st.session_state["saved_odds"][chiave_match] = valore_quota
 
 
@@ -227,7 +231,6 @@ def genera_e_invia_report_48h_strategie(
 
     report_strats = {}
     totale_match_trovati = 0
-    # Set per raccogliere le partite uniche evitando doppioni
     partite_uniche = set()
 
     for strat_nome, params in strategie_dict.items():
@@ -332,7 +335,6 @@ def genera_e_invia_report_48h_strategie(
                 else "N/D"
             )
 
-            # AGGIORNATO: Inclusione esito nel riepilogo
             partite_uniche.add(f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`) 🎯 **Esito: {m_strat}**")
 
             quote_salvate = carica_quote_locali()
@@ -360,9 +362,6 @@ def genera_e_invia_report_48h_strategie(
             messaggio += "----------------------------------\n"
         messaggio += "\n"
 
-    # ==========================================
-    # SEZIONE RIEPILOGO PARTITE UNICHE SUL BOOK
-    # ==========================================
     messaggio += "==================================\n"
     messaggio += "📌 *PARTITE DA PIAZZARE SUL BOOK (UNIVOCHE)*\n"
     messaggio += "==================================\n"
