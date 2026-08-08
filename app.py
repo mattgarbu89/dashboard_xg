@@ -18,7 +18,9 @@ st.set_page_config(
 # CONFIGURAZIONE E CREDENZIALI
 # ==========================================
 LINK_GOOGLE_DRIVE = "https://docs.google.com/spreadsheets/d/1xmLiTz2YDi7XSKHwli1noUTgc2F0xxIxS5NJJ4digCE/edit?usp=sharing"
-FILE_QUOTE_LOCALE = "quote_salvate.json"
+
+# Web App Script per salvataggio permanente su Google Fogli
+URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbyRzltnApp5d54igqS3bKcFbFnxGvdPFFBWVIMXCiv_MO-LBceV4dsT1wJYZTT6opme4A/exec"
 
 TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
 
@@ -32,25 +34,25 @@ TELEGRAM_DESTINATARI = [
 # GESTIONE SALVATAGGIO PERMANENTE E TELEGRAM
 # ==========================================
 def carica_quote_locali():
-    if os.path.exists(FILE_QUOTE_LOCALE):
-        try:
-            with open(FILE_QUOTE_LOCALE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+    try:
+        res = requests.get(URL_GOOGLE_SCRIPT, timeout=10)
+        if res.status_code == 200:
+            return res.json()
+    except Exception as e:
+        st.error(f"Errore lettura quote da Google Fogli: {e}")
     return {}
 
 
 def salva_quota_locale(chiave_match, valore_quota):
-    quote = carica_quote_locali()
-    quote[chiave_match] = valore_quota
-    with open(FILE_QUOTE_LOCALE, "w", encoding="utf-8") as f:
-        json.dump(quote, f, indent=4, ensure_ascii=False)
-    
-    # Aggiornamento dello state locale
-    if "saved_odds" not in st.session_state:
-        st.session_state["saved_odds"] = {}
-    st.session_state["saved_odds"][chiave_match] = valore_quota
+    try:
+        payload = {"chiave": chiave_match, "quota": valore_quota}
+        requests.post(URL_GOOGLE_SCRIPT, json=payload, timeout=10)
+        
+        if "saved_odds" not in st.session_state:
+            st.session_state["saved_odds"] = {}
+        st.session_state["saved_odds"][chiave_match] = valore_quota
+    except Exception as e:
+        st.error(f"Errore salvataggio quota su Google Fogli: {e}")
 
 
 if "saved_odds" not in st.session_state:
@@ -909,7 +911,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
     if len(df_future) > 0:
         st.info(
-            "💡 Le quote già inserite per questa partita in altri mercati vengono proposte in automatico. Premi **💾 Salva** per memorizzarle per questo specifico mercato."
+            "💡 Le quote inserite vengono memorizzate e salvate in modo permanente su Google Fogli."
         )
 
         for idx, row in df_future.iterrows():
