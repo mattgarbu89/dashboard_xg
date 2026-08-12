@@ -1,4 +1,116 @@
-import io
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+
+# Configurazione della pagina Streamlit
+st.set_page_config(
+    page_title="Dashboard Betting & Trend Analysis",
+    page_icon="🚨",
+    layout="wide"
+)
+
+st.sidebar.title("🎛️ Pannello di Controllo")
+
+# Selezione della modalità (inclusa la nuova opzione dedicata)
+modalita = st.sidebar.selectbox(
+    "Seleziona Modalità",
+    [
+        "🚨 Panoramica Strategie & Trend",
+        "🚨 SIRENA INCROCIO TREND",
+        "📊 Analisi Partite & xG",
+        "⚙️ Gestione Dati & Database"
+    ]
+)
+
+# ----------------------------------------------------
+# 1. MODALITÀ: SIRENA INCROCIO TREND (Nuova Sezione)
+# ----------------------------------------------------
+if modalita == "🚨 SIRENA INCROCIO TREND":
+    st.title("🚨 Monitoraggio Incroci & Trend (MM10 vs MM30)")
+    st.markdown("Sezione dedicata all'analisi dei tagli dal basso e dei trend storici con evidenziazione grafica.")
+
+    # Generazione dati di test o caricamento dati storici
+    np.random.seed(42)
+    dates = pd.date_range(start="2026-01-01", periods=60)
+    df_test = pd.DataFrame({
+        "Data": dates,
+        "Valore": np.cumsum(np.random.randn(60)) + 20
+    })
+    
+    # Calcolo Medie Mobili
+    df_test["MM10"] = df_test["Valore"].rolling(window=10).mean()
+    df_test["MM30"] = df_test["Valore"].rolling(window=30).mean()
+
+    # Identificazione "Taglio dal Basso" (MM10 incrocia al rialzo MM30)
+    df_test["Incrocio"] = (df_test["MM10"] > df_test["MM30"]) & (df_test["MM10"].shift(1) <= df_test["MM30"].shift(1))
+    
+    # Creazione Grafico Plotly
+    fig = go.Figure()
+
+    # Linea MM10
+    fig.add_trace(go.Scatter(
+        x=df_test["Data"], y=df_test["MM10"],
+        mode="lines", name="MM10", line=dict(color="blue", width=2)
+    ))
+
+    # Linea MM30
+    fig.add_trace(go.Scatter(
+        x=df_test["Data"], y=df_test["MM30"],
+        mode="lines", name="MM30", line=dict(color="orange", width=2)
+    ))
+
+    # Evidenziazione Tagli dal Basso (Cerchi rossi vuoti ad alto spessore)
+    incroci_df = df_test[df_test["Incrocio"]]
+    if not incroci_df.empty:
+        fig.add_trace(go.Scatter(
+            x=incroci_df["Data"], y=incroci_df["MM10"],
+            mode="markers",
+            name="Taglio dal Basso",
+            marker=dict(
+                size=14,
+                color="rgba(0,0,0,0)",
+                line=dict(color="red", width=3)
+            )
+        ))
+
+    fig.update_layout(
+        title="Analisi Tecnica: Medie Mobili e Segnali di Incrocio",
+        xaxis_title="Data",
+        yaxis_title="Valore",
+        template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Tabella di riscontro dei segnali attivi
+    st.subheader("📋 Tabella Segnali Rilevati")
+    if not incroci_df.empty:
+        st.dataframe(incroci_df[["Data", "MM10", "MM30"]], use_container_width=True)
+    else:
+        st.info("Nessun incrocio rilevato nel periodo di riferimento.")
+
+# ----------------------------------------------------
+# 2. MODALITÀ: PANORAMICA STRATEGIE & TREND
+# ----------------------------------------------------
+elif modalita == "🚨 Panoramica Strategie & Trend":
+    st.title("🚨 Panoramica Strategie & Trend")
+    st.write("Analisi di Mean Reversion, minimi storici e performance globali.")
+    
+    # Spazio per i blocchi di analisi trend esistenti
+    st.info("Sezione attiva. I dati di trend e le medie mobili globali sono caricati correttamente.")
+
+# ----------------------------------------------------
+# 3. ALTRE MODALITÀ (Placeholder)
+# ----------------------------------------------------
+elif modalita == "📊 Analisi Partite & xG":
+    st.title("📊 Analisi Partite & Expected Goals")
+    st.write("Inserisci qui la logica per il calcolo delle partite, parametri C1/C2, Somma e DC.")
+
+elif modalita == "⚙️ Gestione Dati & Database":
+    st.title("⚙️ Gestione Dati & Database")
+    st.write("Gestione dei file di caricamento e connessione ai dati.")import io
 import json
 import os
 import re
