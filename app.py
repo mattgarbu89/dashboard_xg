@@ -416,7 +416,6 @@ def format_dataframe_decimals(df):
     """Formatta tutti i valori numerici con virgola per le tabelle Streamlit."""
     df_formatted = df.copy()
     for col in df_formatted.columns:
-        # Se la colonna è di tipo numerico/float, converte i valori in stringhe con virgola
         if pd.api.types.is_float_dtype(df_formatted[col]):
             df_formatted[col] = df_formatted[col].apply(lambda x: format_num_comma(x))
     return df_formatted
@@ -920,6 +919,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .copy()
         .reset_index(drop=True)
     )
+    
+    # Assegnazione indice con numerazione progressiva a partire da 1
+    df_played.index = range(1, len(df_played) + 1)
+
     df_future = (
         df_filtered[df_filtered["GOL CASA"].isna()]
         .copy()
@@ -1057,10 +1060,8 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         ]
         cols_played.extend(altre_cols)
 
-        df_display = (
-            df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
-        )
-        df_display.index = range(1, len(df_display) + 1)
+        # Invertiamo le righe per la visualizzazione ma SENZA resettare l'indice reale
+        df_display = df_played[cols_played].iloc[::-1].copy()
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
         for c_int in integer_cols:
