@@ -43,16 +43,25 @@ def carica_quote_locali():
     return {}
 
 
-def salva_quota_locale(chiave_match, valore_quota):
-    try:
-        payload = {"chiave": chiave_match, "quota": valore_quota}
-        requests.post(URL_GOOGLE_SCRIPT, json=payload, timeout=10)
-        
-        if "saved_odds" not in st.session_state:
-            st.session_state["saved_odds"] = {}
-        st.session_state["saved_odds"][chiave_match] = valore_quota
-    except Exception as e:
-        st.error(f"Errore salvataggio quota su Google Fogli: {e}")
+def salva_quote_locali_bulk(dizionario_quote):
+    """Salva una mappa di {chiave: quota} inviandole a Google Fogli."""
+    if not dizionario_quote:
+        return
+    
+    if "saved_odds" not in st.session_state:
+        st.session_state["saved_odds"] = {}
+
+    errori = 0
+    for chiave, quota in dizionario_quote.items():
+        try:
+            payload = {"chiave": chiave, "quota": quota}
+            requests.post(URL_GOOGLE_SCRIPT, json=payload, timeout=10)
+            st.session_state["saved_odds"][chiave] = quota
+        except Exception as e:
+            errori += 1
+    
+    if errori > 0:
+        st.error(f"⚠️ Ci sono stati {errori} errori durante il salvataggio di alcune quote.")
 
 
 if "saved_odds" not in st.session_state:
@@ -401,6 +410,15 @@ def format_num_comma(val, decimals=2):
         return fmt.format(float(val)).replace(".", ",")
     except Exception:
         return str(val)
+
+
+def format_dataframe_decimals(df):
+    """Formatta tutti i valori numerici con virgola per le tabelle Streamlit."""
+    df_formatted = df.copy()
+    for col in df_formatted.columns:
+        if pd.api.types.is_float_dtype(df_formatted[col]):
+            df_formatted[col] = df_formatted[col].apply(lambda x: format_num_comma(x))
+    return df_formatted
 
 
 def get_clean_team_names(row, col_casa, col_ospite):
@@ -901,6 +919,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .copy()
         .reset_index(drop=True)
     )
+    
+    # Assegnazione indice con numerazione progressiva a partire da 1
+    df_played.index = range(1, len(df_played) + 1)
+
     df_future = (
         df_filtered[df_filtered["GOL CASA"].isna()]
         .copy()
@@ -911,76 +933,85 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
     if len(df_future) > 0:
         st.info(
-            "💡 Le quote inserite vengono memorizzate e salvate in modo permanente su Google Fogli."
+            "💡 Puoi inserire o modificare le quote per tutte le partite che desideri e cliccare sul pulsante **💾 Salva Tutte le Quote** in fondo alla lista per salvarle tutte insieme."
         )
 
-        for idx, row in df_future.iterrows():
-            m_key, generic_key = get_match_keys(row, col_casa, col_ospite, mercato)
-            nome_casa, nome_ospite = get_clean_team_names(
-                row, col_casa, col_ospite
-            )
+        input_quote_dict = {}
 
-            data_match = ""
-            for col_d in df_future.columns:
-                if "DATA" in str(col_d).upper():
-                    data_match = f" ({row[col_d]})"
-                    break
-
-            c_info, c_qlim, c_input, c_btn, c_res = st.columns(
-                [3, 1.5, 1.5, 1.2, 2]
-            )
-
-            with c_info:
-                st.markdown(f"**{nome_casa} - {nome_ospite}**{data_match}")
-
-            with c_qlim:
-                st.markdown(
-                    f"Quota Limite: **{format_num_comma(quota_limite)}**"
+        with st.form(key=f"form_quote_bulk_{mercato}"):
+            for idx, row in df_future.iterrows():
+                m_key, generic_key = get_match_keys(row, col_casa, col_ospite, mercato)
+                nome_casa, nome_ospite = get_clean_team_names(
+                    row, col_casa, col_ospite
                 )
 
-            val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
+                data_match = ""
+                for col_d in df_future.columns:
+                    if "DATA" in str(col_d).upper():
+                        data_match = f" ({row[col_d]})"
+                        break
 
-            with c_input:
-                q_val = st.number_input(
-                    "Quota Trovata",
-                    min_value=1.00,
-                    max_value=50.00,
-                    value=float(val_proposto),
-                    step=0.05,
-                    key=f"input_{m_key}",
+                c_info, c_qlim, c_input, c_res = st.columns(
+                    [3.5, 1.5, 1.5, 2.5]
                 )
 
-            with c_btn:
-                st.markdown(
-                    "<div style='padding-top: 25px;'></div>",
-                    unsafe_allow_html=True,
-                )
-                if st.button("💾 Salva", key=f"btn_{m_key}"):
-                    salva_quota_locale(m_key, q_val)
-                    st.toast(
-                        f"Quota {format_num_comma(q_val)} salvata per {nome_casa} - {nome_ospite} ({mercato})!"
+                with c_info:
+                    st.markdown(f"**{nome_casa} - {nome_ospite}**{data_match}")
+
+                with c_qlim:
+                    st.markdown(
+                        f"Quota Limite: **{format_num_comma(quota_limite)}**"
                     )
-                    st.rerun()
 
-            with c_res:
-                if abs(float(q_val) - float(val_proposto)) > 0.001:
-                    st.caption("⚠️ *Modificata (non salvata)*")
-                elif e_esatta:
-                    st.caption("✅ *Quota Salvata (Mercato)*")
-                elif val_proposto > 1.00:
-                    st.caption("💡 *Quota Suggerita (da altro mercato)*")
-                else:
-                    st.caption("⏳ *In attesa*")
+                val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
 
-                if q_val > 1.00:
-                    if float(q_val) >= quota_limite:
-                        st.success(
-                            f"🟢 **VALUE BET!** ({format_num_comma(q_val)})"
-                        )
+                with c_input:
+                    q_val = st.number_input(
+                        "Quota Trovata",
+                        min_value=1.00,
+                        max_value=50.00,
+                        value=float(val_proposto),
+                        step=0.05,
+                        key=f"input_{m_key}",
+                    )
+                    input_quote_dict[m_key] = (q_val, val_proposto)
+
+                with c_res:
+                    if abs(float(q_val) - float(val_proposto)) > 0.001:
+                        st.caption("⚠️ *Modificata (in attesa di salvataggio)*")
+                    elif e_esatta:
+                        st.caption("✅ *Quota Salvata (Mercato)*")
+                    elif val_proposto > 1.00:
+                        st.caption("💡 *Quota Suggerita (da altro mercato)*")
                     else:
-                        st.error(f"🔴 **NO VALUE** ({format_num_comma(q_val)})")
+                        st.caption("⏳ *In attesa*")
 
-            st.divider()
+                    if q_val > 1.00:
+                        if float(q_val) >= quota_limite:
+                            st.success(
+                                f"🟢 **VALUE BET!** ({format_num_comma(q_val)})"
+                            )
+                        else:
+                            st.error(f"🔴 **NO VALUE** ({format_num_comma(q_val)})")
+
+                st.divider()
+
+            submit_bulk = st.form_submit_button("💾 Salva Tutte le Quote Inserite", use_container_width=True)
+
+        if submit_bulk:
+            quote_da_salvare = {}
+            for k, (v_nuovo, v_vecchio) in input_quote_dict.items():
+                if abs(float(v_nuovo) - float(v_vecchio)) > 0.001 or float(v_nuovo) > 1.00:
+                    quote_da_salvare[k] = float(v_nuovo)
+
+            if quote_da_salvare:
+                with st.spinner("Salvataggio di tutte le quote in corso su Google Fogli..."):
+                    salva_quote_locali_bulk(quote_da_salvare)
+                st.success(f"✅ Salvate con successo {len(quote_da_salvare)} quote!")
+                st.rerun()
+            else:
+                st.info("ℹ️ Nessuna nuova quota o modifica da salvare.")
+
     else:
         st.info("Nessuna prossima partita trovata per questa selezione.")
 
@@ -1029,10 +1060,8 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         ]
         cols_played.extend(altre_cols)
 
-        df_display = (
-            df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
-        )
-        df_display.index = range(1, len(df_display) + 1)
+        # Invertiamo le righe per la visualizzazione ma SENZA resettare l'indice reale
+        df_display = df_played[cols_played].iloc[::-1].copy()
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
         for c_int in integer_cols:
@@ -1055,7 +1084,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 lambda x: format_num_comma(x)
             )
 
-        st.dataframe(df_display, use_container_width=True)
+        st.dataframe(format_dataframe_decimals(df_display), use_container_width=True)
 
 
 # ==========================================
@@ -1460,7 +1489,7 @@ try:
             )
             if alert_minimo_ritardo_zero:
                 st.dataframe(
-                    pd.DataFrame(alert_minimo_ritardo_zero), use_container_width=True
+                    format_dataframe_decimals(pd.DataFrame(alert_minimo_ritardo_zero)), use_container_width=True
                 )
             else:
                 st.info(
@@ -1477,7 +1506,7 @@ try:
             )
             if alert_bounce_back:
                 st.dataframe(
-                    pd.DataFrame(alert_bounce_back), use_container_width=True
+                    format_dataframe_decimals(pd.DataFrame(alert_bounce_back)), use_container_width=True
                 )
             else:
                 st.info(
@@ -1494,7 +1523,7 @@ try:
             )
             if alert_underperforming:
                 st.dataframe(
-                    pd.DataFrame(alert_underperforming),
+                    format_dataframe_decimals(pd.DataFrame(alert_underperforming)),
                     use_container_width=True,
                 )
             else:
@@ -1610,7 +1639,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {params['MERCATO']}"
                         )
-                        st.dataframe(df_freq, use_container_width=True)
+                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1766,7 +1795,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {mercato_totale_sel}"
                         )
-                        st.dataframe(df_freq, use_container_width=True)
+                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1961,7 +1990,7 @@ try:
 
             if cicli_target:
                 df_cicli_res = pd.DataFrame(cicli_target)
-                st.dataframe(df_cicli_res, use_container_width=True)
+                st.dataframe(format_dataframe_decimals(df_cicli_res), use_container_width=True)
             else:
                 st.info(
                     "Al momento nessuna strategia o mercato (Generale o Serie A) ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
