@@ -954,7 +954,7 @@ def render_plotly_moving_averages_chart(df_played, titolo_grafico="Incrocio Medi
         line=dict(color='#D32F2F', width=2, dash='dash')
     ))
 
-    # Evidenziazione dei punti di "Taglio dal Basso" con Cerchio
+    # Evidenziazione dei punti di "Taglio dal Basso" con Cerchio Rosso Vuoto a Bordo Spesso
     if not punti_incrocio.empty:
         fig.add_trace(go.Scatter(
             x=punti_incrocio['Match_Num'],
@@ -962,9 +962,9 @@ def render_plotly_moving_averages_chart(df_played, titolo_grafico="Incrocio Medi
             mode='markers',
             name='Taglio dal Basso (Inversione)',
             marker=dict(
-                size=18,
+                size=20,
                 color='rgba(0,0,0,0)',
-                line=dict(color='#FFD700', width=3),  # Cerchio Giallo
+                line=dict(color='#FF0000', width=4),  # Cerchio Rosso Vuoto Spesso
                 symbol='circle'
             ),
             hoverinfo='text',
@@ -981,10 +981,10 @@ def render_plotly_moving_averages_chart(df_played, titolo_grafico="Incrocio Medi
             arrowhead=2,
             arrowsize=1,
             arrowwidth=2,
-            arrowcolor="#FF9800",
+            arrowcolor="#FF0000",
             ax=0,
             ay=-40,
-            font=dict(size=12, color="#FF9800")
+            font=dict(size=12, color="#FF0000")
         )
 
     fig.update_layout(
@@ -1617,6 +1617,65 @@ try:
                 st.info(
                     "Tutte le strategie e i mercati sono stabili sopra la loro media target."
                 )
+
+            # =========================================================
+            # NUOVO BLOCCO INDIPENDENTE: GRAFICI DEDICATI STRATEGIE & MERCATI
+            # =========================================================
+            st.markdown("---")
+            st.markdown("## 📊 Grafici Indipendenti Trend Medie Mobili (MM10 vs MM30)")
+            st.caption("Visualizzazione dedicata e indipendente dell'incrocio delle Medie Mobili MM10 e MM30 per tutte le Strategie e tutti i Mercati (evidenziato con cerchio rosso vuoto ad alto spessore).")
+
+            with st.expander("📌 Mostra Grafici Strategie (Database Generale)", expanded=False):
+                for item in ranked_strategies_gen:
+                    name = item["nome"]
+                    params = item["params"]
+                    df_strat = apply_filters(df_generale, params)
+                    df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
+                    if len(df_played_strat) >= 10:
+                        render_plotly_moving_averages_chart(
+                            df_played_strat, 
+                            f"Strategia (Generale): {name}"
+                        )
+
+            with st.expander("📌 Mostra Grafici Strategie (Serie A)", expanded=False):
+                for item in ranked_strategies_sa:
+                    name = item["nome"]
+                    params = item["params"]
+                    df_strat = apply_filters(df_serie_a, params)
+                    df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
+                    if len(df_played_strat) >= 10:
+                        render_plotly_moving_averages_chart(
+                            df_played_strat, 
+                            f"Strategia (Serie A): {name}"
+                        )
+
+            with st.expander("📌 Mostra Grafici Mercati Totali (Database Generale)", expanded=False):
+                for m in MERCATI_TOTALI:
+                    params_m = {
+                        "SOMMA": None, "DC": None, "C1": None, "C2": None,
+                        "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": m
+                    }
+                    df_m = apply_filters(df_generale, params_m)
+                    df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+                    if len(df_played_m) >= 10:
+                        render_plotly_moving_averages_chart(
+                            df_played_m, 
+                            f"Mercato Generale: {m}"
+                        )
+
+            with st.expander("📌 Mostra Grafici Mercati Totali (Serie A)", expanded=False):
+                for m in MERCATI_TOTALI:
+                    params_m = {
+                        "SOMMA": None, "DC": None, "C1": None, "C2": None,
+                        "MEDIA CASA": None, "MEDIA OSPITE": None, "MERCATO": m
+                    }
+                    df_m = apply_filters(df_serie_a, params_m)
+                    df_played_m = df_m[df_m["GOL CASA"].notna()].copy()
+                    if len(df_played_m) >= 10:
+                        render_plotly_moving_averages_chart(
+                            df_played_m, 
+                            f"Mercato Serie A: {m}"
+                        )
 
         elif "📊" in modalita:
             strat_info = strat_map[strat_nome]
