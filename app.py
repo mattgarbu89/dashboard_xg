@@ -920,7 +920,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .reset_index(drop=True)
     )
     
-    # Assegnazione indice con numerazione progressiva a partire da 1
     df_played.index = range(1, len(df_played) + 1)
 
     df_future = (
@@ -1060,7 +1059,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         ]
         cols_played.extend(altre_cols)
 
-        # Invertiamo le righe per la visualizzazione ma SENZA resettare l'indice reale
         df_display = df_played[cols_played].iloc[::-1].copy()
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
@@ -1229,7 +1227,6 @@ try:
             "UNDER 2,5 OSPITE",
         ]
 
-        # --- SIDEBAR - SELEZIONI IN ALTO ---
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
@@ -1560,6 +1557,7 @@ try:
             )
 
             st.sidebar.markdown("---")
+            # SLIDER MODIFICABILE DA 10 A 50 PARTITE PER LA MEDIA MOBILE
             finestra_ma = st.sidebar.slider(
                 "Finestra Media Mobile (Partite)", 10, 50, 20, 5
             )
@@ -1584,7 +1582,7 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metrice Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
@@ -1661,10 +1659,12 @@ try:
 
             st.markdown("---")
 
+            # NUOVO GRAFICO CLASSICO: FREQUENZA MEDIA E MEDIA MOBILE MODIFICABILE
             if tot_match >= finestra_ma:
+                st.markdown(f"#### 📈 Andamento Mercato (Frequenza Media & MM {finestra_ma} partite)")
                 chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
-                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                    f"Media Mobile ({finestra_ma} p)": df_played["MA"],
+                    "Frequenza Media Storica": df_played["FREQ_CUM_DINAMICA"],
                 })
                 st.line_chart(chart_data)
 
@@ -1817,10 +1817,12 @@ try:
 
             st.markdown("---")
 
+            # GRAFICO CLASSICO ANCHE NEL DATABASE TOTALE/SERIE A
             if tot_match >= finestra_ma:
+                st.markdown(f"#### 📈 Andamento Mercato (Frequenza Media & MM {finestra_ma} partite)")
                 chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
-                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                    f"Media Mobile ({finestra_ma} p)": df_played["MA"],
+                    "Frequenza Media Storica": df_played["FREQ_CUM_DINAMICA"],
                 })
                 st.line_chart(chart_data)
 
