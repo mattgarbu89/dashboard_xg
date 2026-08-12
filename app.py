@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import streamlit as st
-import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="Dashboard Analisi xG & Value Bet Finder",
@@ -914,92 +913,6 @@ def get_combination_string(params):
     )
 
 
-# ==========================================
-# FUNZIONE GRAFICO PLOTLY CON TAGLIO DAL BASSO (MM10 vs MM30)
-# ==========================================
-def render_plotly_moving_averages_chart(df_played, titolo_grafico="Incrocio Medie Mobili (MM10 vs MM30)"):
-    if len(df_played) < 10:
-        st.info("ℹ️ Servono almeno 10 partite per calcolare le Medie Mobili e generare il grafico.")
-        return
-
-    df_chart = df_played.copy().reset_index(drop=True)
-    df_chart["Match_Num"] = df_chart.index + 1
-
-    # Calcolo MM10 e MM30
-    df_chart['MM10'] = df_chart['WIN'].rolling(window=10, min_periods=1).mean() * 100
-    df_chart['MM30'] = df_chart['WIN'].rolling(window=30, min_periods=1).mean() * 100
-
-    # Taglio dal basso (MM10 taglia dal basso MM30)
-    df_chart['Crossover_Up'] = (df_chart['MM10'] > df_chart['MM30']) & (df_chart['MM10'].shift(1) <= df_chart['MM30'].shift(1))
-    
-    punti_incrocio = df_chart[df_chart['Crossover_Up']]
-
-    fig = go.Figure()
-
-    # Linea MM10
-    fig.add_trace(go.Scatter(
-        x=df_chart['Match_Num'],
-        y=df_chart['MM10'],
-        mode='lines',
-        name='MM10 (Veloce)',
-        line=dict(color='#2E7D32', width=2)
-    ))
-
-    # Linea MM30
-    fig.add_trace(go.Scatter(
-        x=df_chart['Match_Num'],
-        y=df_chart['MM30'],
-        mode='lines',
-        name='MM30 (Lenta)',
-        line=dict(color='#D32F2F', width=2, dash='dash')
-    ))
-
-    # Evidenziazione dei punti di "Taglio dal Basso" con Cerchio
-    if not punti_incrocio.empty:
-        fig.add_trace(go.Scatter(
-            x=punti_incrocio['Match_Num'],
-            y=punti_incrocio['MM10'],
-            mode='markers',
-            name='Taglio dal Basso (Inversione)',
-            marker=dict(
-                size=18,
-                color='rgba(0,0,0,0)',
-                line=dict(color='#FFD700', width=3),  # Cerchio Giallo
-                symbol='circle'
-            ),
-            hoverinfo='text',
-            hovertext=[f"Match #{row['Match_Num']}<br>MM10: {format_num_comma(row['MM10'], 1)}%<br>MM30: {format_num_comma(row['MM30'], 1)}%" for _, row in punti_incrocio.iterrows()]
-        ))
-
-        # Evidenziazione con freccia sull'ultimo incrocio in particolare
-        ultimo_incrocio = punti_incrocio.iloc[-1]
-        fig.add_annotation(
-            x=ultimo_incrocio['Match_Num'],
-            y=ultimo_incrocio['MM10'],
-            text="🚨 Ultimo Taglio dal Basso",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=2,
-            arrowcolor="#FF9800",
-            ax=0,
-            ay=-40,
-            font=dict(size=12, color="#FF9800")
-        )
-
-    fig.update_layout(
-        title=titolo_grafico,
-        xaxis_title="Numero Partite (Progressivo)",
-        yaxis_title="Win Rate %",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        template="plotly_white",
-        height=450
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
 def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
     df_played = (
         df_filtered[df_filtered["GOL CASA"].notna()]
@@ -1748,9 +1661,12 @@ try:
 
             st.markdown("---")
 
-            # RENDERING GRAFICO PLOTLY CON MM10 vs MM30 E CERCHIO SULL'INCROCIO
-            st.markdown("### 📈 Grafico Trend Medie Mobili (MM10 vs MM30)")
-            render_plotly_moving_averages_chart(df_played, f"Trend Strategia: {strat_nome}")
+            if tot_match >= finestra_ma:
+                chart_data = pd.DataFrame({
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                })
+                st.line_chart(chart_data)
 
             render_tables(
                 df_strat,
@@ -1901,9 +1817,12 @@ try:
 
             st.markdown("---")
 
-            # RENDERING GRAFICO PLOTLY CON MM10 vs MM30 E CERCHIO SULL'INCROCIO
-            st.markdown("### 📈 Grafico Trend Medie Mobili (MM10 vs MM30)")
-            render_plotly_moving_averages_chart(df_played, f"Trend Mercato: {mercato_totale_sel}")
+            if tot_match >= finestra_ma:
+                chart_data = pd.DataFrame({
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
+                })
+                st.line_chart(chart_data)
 
             render_tables(
                 df_tot,
