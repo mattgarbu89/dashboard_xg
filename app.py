@@ -412,6 +412,16 @@ def format_num_comma(val, decimals=2):
         return str(val)
 
 
+def format_dataframe_decimals(df):
+    """Formatta tutti i valori numerici con virgola per le tabelle Streamlit."""
+    df_formatted = df.copy()
+    for col in df_formatted.columns:
+        # Se la colonna è di tipo numerico/float, converte i valori in stringhe con virgola
+        if pd.api.types.is_float_dtype(df_formatted[col]):
+            df_formatted[col] = df_formatted[col].apply(lambda x: format_num_comma(x))
+    return df_formatted
+
+
 def get_clean_team_names(row, col_casa, col_ospite):
     val_casa = str(row.get(col_casa, "")).strip()
     val_ospite = str(row.get(col_ospite, "")).strip()
@@ -1073,7 +1083,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 lambda x: format_num_comma(x)
             )
 
-        st.dataframe(df_display, use_container_width=True)
+        st.dataframe(format_dataframe_decimals(df_display), use_container_width=True)
 
 
 # ==========================================
@@ -1478,7 +1488,7 @@ try:
             )
             if alert_minimo_ritardo_zero:
                 st.dataframe(
-                    pd.DataFrame(alert_minimo_ritardo_zero), use_container_width=True
+                    format_dataframe_decimals(pd.DataFrame(alert_minimo_ritardo_zero)), use_container_width=True
                 )
             else:
                 st.info(
@@ -1495,7 +1505,7 @@ try:
             )
             if alert_bounce_back:
                 st.dataframe(
-                    pd.DataFrame(alert_bounce_back), use_container_width=True
+                    format_dataframe_decimals(pd.DataFrame(alert_bounce_back)), use_container_width=True
                 )
             else:
                 st.info(
@@ -1512,7 +1522,7 @@ try:
             )
             if alert_underperforming:
                 st.dataframe(
-                    pd.DataFrame(alert_underperforming),
+                    format_dataframe_decimals(pd.DataFrame(alert_underperforming)),
                     use_container_width=True,
                 )
             else:
@@ -1628,7 +1638,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {params['MERCATO']}"
                         )
-                        st.dataframe(df_freq, use_container_width=True)
+                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1784,7 +1794,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {mercato_totale_sel}"
                         )
-                        st.dataframe(df_freq, use_container_width=True)
+                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1979,7 +1989,7 @@ try:
 
             if cicli_target:
                 df_cicli_res = pd.DataFrame(cicli_target)
-                st.dataframe(df_cicli_res, use_container_width=True)
+                st.dataframe(format_dataframe_decimals(df_cicli_res), use_container_width=True)
             else:
                 st.info(
                     "Al momento nessuna strategia o mercato (Generale o Serie A) ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
