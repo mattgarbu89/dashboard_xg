@@ -412,15 +412,6 @@ def format_num_comma(val, decimals=2):
         return str(val)
 
 
-def format_dataframe_decimals(df):
-    """Formatta tutti i valori numerici con virgola per le tabelle Streamlit."""
-    df_formatted = df.copy()
-    for col in df_formatted.columns:
-        if pd.api.types.is_float_dtype(df_formatted[col]):
-            df_formatted[col] = df_formatted[col].apply(lambda x: format_num_comma(x))
-    return df_formatted
-
-
 def get_clean_team_names(row, col_casa, col_ospite):
     val_casa = str(row.get(col_casa, "")).strip()
     val_ospite = str(row.get(col_ospite, "")).strip()
@@ -919,9 +910,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .copy()
         .reset_index(drop=True)
     )
-    
-    df_played.index = range(1, len(df_played) + 1)
-
     df_future = (
         df_filtered[df_filtered["GOL CASA"].isna()]
         .copy()
@@ -1059,7 +1047,10 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         ]
         cols_played.extend(altre_cols)
 
-        df_display = df_played[cols_played].iloc[::-1].copy()
+        df_display = (
+            df_played[cols_played].iloc[::-1].copy().reset_index(drop=True)
+        )
+        df_display.index = range(1, len(df_display) + 1)
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
         for c_int in integer_cols:
@@ -1082,7 +1073,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 lambda x: format_num_comma(x)
             )
 
-        st.dataframe(format_dataframe_decimals(df_display), use_container_width=True)
+        st.dataframe(df_display, use_container_width=True)
 
 
 # ==========================================
@@ -1227,6 +1218,7 @@ try:
             "UNDER 2,5 OSPITE",
         ]
 
+        # --- SIDEBAR - SELEZIONI IN ALTO ---
         st.sidebar.header("📌 SELEZIONA MODALITÀ")
         modalita = st.sidebar.radio(
             "Scegli il tipo di analisi:",
@@ -1486,7 +1478,7 @@ try:
             )
             if alert_minimo_ritardo_zero:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_minimo_ritardo_zero)), use_container_width=True
+                    pd.DataFrame(alert_minimo_ritardo_zero), use_container_width=True
                 )
             else:
                 st.info(
@@ -1503,7 +1495,7 @@ try:
             )
             if alert_bounce_back:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_bounce_back)), use_container_width=True
+                    pd.DataFrame(alert_bounce_back), use_container_width=True
                 )
             else:
                 st.info(
@@ -1520,7 +1512,7 @@ try:
             )
             if alert_underperforming:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_underperforming)),
+                    pd.DataFrame(alert_underperforming),
                     use_container_width=True,
                 )
             else:
@@ -1557,7 +1549,6 @@ try:
             )
 
             st.sidebar.markdown("---")
-            # SLIDER MODIFICABILE DA 10 A 50 PARTITE PER LA MEDIA MOBILE
             finestra_ma = st.sidebar.slider(
                 "Finestra Media Mobile (Partite)", 10, 50, 20, 5
             )
@@ -1582,7 +1573,7 @@ try:
             with st.container(border=True):
                 st.markdown(get_combination_string(params))
 
-            st.markdown("#### 📈 Metriche Principali & Cicli di Ritardo")
+            st.markdown("#### 📈 Metrice Principali & Cicli di Ritardo")
 
             r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
             with r1_c1:
@@ -1637,7 +1628,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {params['MERCATO']}"
                         )
-                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
+                        st.dataframe(df_freq, use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1659,12 +1650,10 @@ try:
 
             st.markdown("---")
 
-            # NUOVO GRAFICO CLASSICO: FREQUENZA MEDIA E MEDIA MOBILE MODIFICABILE
             if tot_match >= finestra_ma:
-                st.markdown(f"#### 📈 Andamento Mercato (Frequenza Media & MM {finestra_ma} partite)")
                 chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma} p)": df_played["MA"],
-                    "Frequenza Media Storica": df_played["FREQ_CUM_DINAMICA"],
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
                 })
                 st.line_chart(chart_data)
 
@@ -1795,7 +1784,7 @@ try:
                             res_delays["ritardo_medio"],
                             f"Esito {mercato_totale_sel}"
                         )
-                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
+                        st.dataframe(df_freq, use_container_width=True)
                     else:
                         st.write("Nessun dato")
 
@@ -1817,12 +1806,10 @@ try:
 
             st.markdown("---")
 
-            # GRAFICO CLASSICO ANCHE NEL DATABASE TOTALE/SERIE A
             if tot_match >= finestra_ma:
-                st.markdown(f"#### 📈 Andamento Mercato (Frequenza Media & MM {finestra_ma} partite)")
                 chart_data = pd.DataFrame({
-                    f"Media Mobile ({finestra_ma} p)": df_played["MA"],
-                    "Frequenza Media Storica": df_played["FREQ_CUM_DINAMICA"],
+                    f"Media Mobile ({finestra_ma} match)": df_played["MA"],
+                    "Frequenza Cumulativa": df_played["FREQ_CUM_DINAMICA"],
                 })
                 st.line_chart(chart_data)
 
@@ -1992,7 +1979,7 @@ try:
 
             if cicli_target:
                 df_cicli_res = pd.DataFrame(cicli_target)
-                st.dataframe(format_dataframe_decimals(df_cicli_res), use_container_width=True)
+                st.dataframe(df_cicli_res, use_container_width=True)
             else:
                 st.info(
                     "Al momento nessuna strategia o mercato (Generale o Serie A) ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
