@@ -4,6 +4,7 @@ import os
 import re
 import zipfile
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
@@ -25,8 +26,8 @@ URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbyRzltnApp5d54igqS3
 TELEGRAM_BOT_TOKEN = "8841718832:AAGJaB7mB4wv51TZA6WY0cThwRNDEuvvoFw"
 
 TELEGRAM_DESTINATARI = [
-    "1192615708",      # Chat ID Privato
-    "-1004447605760"    # ID del Canale/Gruppo Telegram
+    "1192615708",  # Chat ID Privato
+    "-1004447605760",  # ID del Canale/Gruppo Telegram
 ]
 
 
@@ -47,7 +48,7 @@ def salva_quote_locali_bulk(dizionario_quote):
     """Salva una mappa di {chiave: quota} inviandole a Google Fogli."""
     if not dizionario_quote:
         return
-    
+
     if "saved_odds" not in st.session_state:
         st.session_state["saved_odds"] = {}
 
@@ -59,9 +60,11 @@ def salva_quote_locali_bulk(dizionario_quote):
             st.session_state["saved_odds"][chiave] = quota
         except Exception as e:
             errori += 1
-    
+
     if errori > 0:
-        st.error(f"⚠️ Ci sono stati {errori} errori durante il salvataggio di alcune quote.")
+        st.error(
+            f"⚠️ Ci sono stati {errori} errori durante il salvataggio di alcune quote."
+        )
 
 
 if "saved_odds" not in st.session_state:
@@ -71,7 +74,7 @@ if "saved_odds" not in st.session_state:
 def escape_markdown(text):
     if not isinstance(text, str):
         text = str(text)
-    return re.sub(r'[*_`\[\]]', '', text)
+    return re.sub(r"[*_`\[\]]", "", text)
 
 
 def invia_singolo_messaggio_telegram(chat_id, testo):
@@ -94,7 +97,7 @@ def invia_singolo_messaggio_telegram(chat_id, testo):
 def invia_telegram(testo):
     MAX_CHAR = 3500
     blocchi = []
-    
+
     if len(testo) <= MAX_CHAR:
         blocchi.append(testo)
     else:
@@ -128,7 +131,9 @@ def invia_telegram(testo):
                     dettagli_errori.append(f"Chat {chat_id}: {str(e_fb)}")
 
     if not esito_globale and dettagli_errori:
-        st.error(f"⚠️ Errore Telegram dettagliato: {', '.join(set(dettagli_errori))}")
+        st.error(
+            f"⚠️ Errore Telegram dettagliato: {', '.join(set(dettagli_errori))}"
+        )
 
     return esito_globale
 
@@ -208,9 +213,7 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
 
     messaggio += "📈 *PERFORMANCE GLOBALE:* \n"
     messaggio += f"⚽ Match Esitati Totali: `{tot_globali}`\n"
-    messaggio += (
-        f"✅ Vinte: `{totale_vinte_globali}` | ❌ Perse: `{totale_perse_globali}`\n"
-    )
+    messaggio += f"✅ Vinte: `{totale_vinte_globali}` | ❌ Perse: `{totale_perse_globali}`\n"
     messaggio += f"🎯 Win Rate Reale: `{format_num_comma(wr_globale)}%`\n"
     messaggio += f"💰 PnL Netto (1u/bet): `{format_num_comma(profitto_totale_unita, 2)}u`\n"
     messaggio += f"🚀 ROI Reale: `{format_num_comma(roi_globale, 2)}%`\n"
@@ -219,12 +222,12 @@ def invia_report_esiti_telegram(df_base, strategie_dict, col_casa, col_ospite):
     for strat_nome, data in report_strats.items():
         s_clean = escape_markdown(strat_nome)
         messaggio += f"📌 *STRATEGIA:* `{s_clean}`\n"
-        messaggio += (
-            f"📊 Vinte: `{data['vinte']}` | Perse: `{data['perse']}` (Tot: `{data['totali']}`)\n"
-        )
+        messaggio += f"📊 Vinte: `{data['vinte']}` | Perse: `{data['perse']}` (Tot: `{data['totali']}`)\n"
         messaggio += f"🎯 Win Rate 'Da Oggi': `{format_num_comma(data['wr'])}%`\n"
         messaggio += f"🏛️ Win Rate Storico DB: `{format_num_comma(data['wr_storico'])}%`\n"
-        messaggio += f"💵 Profitto Netto: `{format_num_comma(data['profitto'], 2)}u`\n"
+        messaggio += (
+            f"💵 Profitto Netto: `{format_num_comma(data['profitto'], 2)}u`\n"
+        )
         messaggio += "----------------------------------\n"
 
     ok = invia_telegram(messaggio)
@@ -283,11 +286,15 @@ def genera_e_invia_report_48h_strategie(
                 )
                 if not ora_str or ora_str.lower() == "nan":
                     ora_str = "00:00"
-                
-                dt_obj = pd.to_datetime(f"{data_str} {ora_str}", dayfirst=True, errors="coerce")
+
+                dt_obj = pd.to_datetime(
+                    f"{data_str} {ora_str}", dayfirst=True, errors="coerce"
+                )
                 if pd.isna(dt_obj):
-                    dt_obj = pd.to_datetime(f"{data_str} {ora_str}", errors="coerce")
-                    
+                    dt_obj = pd.to_datetime(
+                        f"{data_str} {ora_str}", errors="coerce"
+                    )
+
                 df_future.at[idx, "DATETIME_MATCH"] = dt_obj
             except Exception:
                 pass
@@ -313,7 +320,9 @@ def genera_e_invia_report_48h_strategie(
         )
         ok = invia_telegram(msg_empty)
         if ok:
-            st.info("ℹ️ Report inviato su Telegram: nessuna partita programmata nelle prossime 48h.")
+            st.info(
+                "ℹ️ Report inviato su Telegram: nessuna partita programmata nelle prossime 48h."
+            )
         return
 
     messaggio = f"📅 *REPORT STRATEGIE (PROSSIME 48 ORE)*\n"
@@ -329,7 +338,9 @@ def genera_e_invia_report_48h_strategie(
         s_clean = escape_markdown(strat_nome)
         messaggio += f"📌 *STRATEGIA:* `{s_clean}`\n"
         messaggio += f"🎯 *Esito Mercato:* `{m_strat}`\n"
-        messaggio += f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
+        messaggio += (
+            f"⚖️ *Quota Limite Strategia:* `{format_num_comma(q_limite)}`\n\n"
+        )
 
         for idx, row in df_m.iterrows():
             casa, ospite = get_clean_team_names(row, col_casa, col_ospite)
@@ -346,7 +357,9 @@ def genera_e_invia_report_48h_strategie(
                 else "N/D"
             )
 
-            partite_uniche.add(f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`) 🎯 **Esito: {m_strat}**")
+            partite_uniche.add(
+                f"⚽ {casa_clean} - {ospite_clean} (`{dt_str}`) 🎯 **Esito: {m_strat}**"
+            )
 
             quote_salvate = carica_quote_locali()
             quota_inserita = quote_salvate.get(m_key, None)
@@ -417,7 +430,9 @@ def format_dataframe_decimals(df):
     df_formatted = df.copy()
     for col in df_formatted.columns:
         if pd.api.types.is_float_dtype(df_formatted[col]):
-            df_formatted[col] = df_formatted[col].apply(lambda x: format_num_comma(x))
+            df_formatted[col] = df_formatted[col].apply(
+                lambda x: format_num_comma(x)
+            )
     return df_formatted
 
 
@@ -498,7 +513,7 @@ def pulisci_zip_excel(file_bytes):
 def load_clean_df(file_bytes, sheet_target="INCROCI GEMINI"):
     output = pulisci_zip_excel(file_bytes)
     xls = pd.ExcelFile(output, engine="openpyxl")
-    
+
     target_sheet = None
     for sheet in xls.sheet_names:
         if sheet_target.upper() in sheet.upper():
@@ -544,10 +559,14 @@ def load_clean_df(file_bytes, sheet_target="INCROCI GEMINI"):
 def load_database_serie_a_df(file_bytes):
     output = pulisci_zip_excel(file_bytes)
     xls = pd.ExcelFile(output, engine="openpyxl")
-    
+
     target_sheet = None
     for sheet in xls.sheet_names:
-        if "DATABASE SERIE A" in sheet.upper() or "SERIE A" in sheet.upper() or "ITALIA SERIE A" in sheet.upper():
+        if (
+            "DATABASE SERIE A" in sheet.upper()
+            or "SERIE A" in sheet.upper()
+            or "ITALIA SERIE A" in sheet.upper()
+        ):
             target_sheet = sheet
             break
 
@@ -570,14 +589,16 @@ def load_database_serie_a_df(file_bytes):
         "HTHG": "GOL CASA HT",
         "HTAG": "GOL OSPITE HT",
         "FTR": "ESITO FINALE",
-        "HTR": "ESITO HT"
+        "HTR": "ESITO HT",
     }
-    
+
     df.rename(columns=mappatura_colonne, inplace=True)
 
     if "data" in df.columns:
-        df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.strftime("%d/%m/%Y")
-    
+        df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.strftime(
+            "%d/%m/%Y"
+        )
+
     num_cols = ["GOL CASA", "GOL OSPITE", "GOL CASA HT", "GOL OSPITE HT"]
     for col in num_cols:
         if col in df.columns:
@@ -919,7 +940,7 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .copy()
         .reset_index(drop=True)
     )
-    
+
     # Assegnazione indice con numerazione progressiva a partire da 1
     df_played.index = range(1, len(df_played) + 1)
 
@@ -940,7 +961,9 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
 
         with st.form(key=f"form_quote_bulk_{mercato}"):
             for idx, row in df_future.iterrows():
-                m_key, generic_key = get_match_keys(row, col_casa, col_ospite, mercato)
+                m_key, generic_key = get_match_keys(
+                    row, col_casa, col_ospite, mercato
+                )
                 nome_casa, nome_ospite = get_clean_team_names(
                     row, col_casa, col_ospite
                 )
@@ -963,7 +986,9 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                         f"Quota Limite: **{format_num_comma(quota_limite)}**"
                     )
 
-                val_proposto, e_esatta = carica_quota_con_fallback(m_key, generic_key)
+                val_proposto, e_esatta = carica_quota_con_fallback(
+                    m_key, generic_key
+                )
 
                 with c_input:
                     q_val = st.number_input(
@@ -992,22 +1017,33 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                                 f"🟢 **VALUE BET!** ({format_num_comma(q_val)})"
                             )
                         else:
-                            st.error(f"🔴 **NO VALUE** ({format_num_comma(q_val)})")
+                            st.error(
+                                f"🔴 **NO VALUE** ({format_num_comma(q_val)})"
+                            )
 
                 st.divider()
 
-            submit_bulk = st.form_submit_button("💾 Salva Tutte le Quote Inserite", use_container_width=True)
+            submit_bulk = st.form_submit_button(
+                "💾 Salva Tutte le Quote Inserite", use_container_width=True
+            )
 
         if submit_bulk:
             quote_da_salvare = {}
             for k, (v_nuovo, v_vecchio) in input_quote_dict.items():
-                if abs(float(v_nuovo) - float(v_vecchio)) > 0.001 or float(v_nuovo) > 1.00:
+                if (
+                    abs(float(v_nuovo) - float(v_vecchio)) > 0.001
+                    or float(v_nuovo) > 1.00
+                ):
                     quote_da_salvare[k] = float(v_nuovo)
 
             if quote_da_salvare:
-                with st.spinner("Salvataggio di tutte le quote in corso su Google Fogli..."):
+                with st.spinner(
+                    "Salvataggio di tutte le quote in corso su Google Fogli..."
+                ):
                     salva_quote_locali_bulk(quote_da_salvare)
-                st.success(f"✅ Salvate con successo {len(quote_da_salvare)} quote!")
+                st.success(
+                    f"✅ Salvate con successo {len(quote_da_salvare)} quote!"
+                )
                 st.rerun()
             else:
                 st.info("ℹ️ Nessuna nuova quota o modifica da salvare.")
@@ -1054,7 +1090,15 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
             for c in df_played.columns
             if any(
                 k in str(c).upper()
-                for k in ["GOL CASA", "GOL OSPITE", "SOMMA", "DC", "C1", "C2", "WIN"]
+                for k in [
+                    "GOL CASA",
+                    "GOL OSPITE",
+                    "SOMMA",
+                    "DC",
+                    "C1",
+                    "C2",
+                    "WIN",
+                ]
             )
             and c not in cols_played
         ]
@@ -1084,7 +1128,9 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
                 lambda x: format_num_comma(x)
             )
 
-        st.dataframe(format_dataframe_decimals(df_display), use_container_width=True)
+        st.dataframe(
+            format_dataframe_decimals(df_display), use_container_width=True
+        )
 
 
 # ==========================================
@@ -1248,7 +1294,9 @@ try:
         if "Serie A" in modalita:
             df_base = load_database_serie_a_df(raw_file_bytes)
         else:
-            df_base = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+            df_base = load_clean_df(
+                raw_file_bytes, sheet_target="INCROCI GEMINI"
+            )
 
         ranked_strategies = get_sorted_strategies(df_base, STRATEGIE_SALVATE)
         strat_map = {item["nome"]: item for item in ranked_strategies}
@@ -1259,7 +1307,10 @@ try:
                 "Strategia attiva:", list(strat_map.keys())
             )
             st.sidebar.markdown("---")
-        elif "📂 Database Totale" in modalita or "📂 Database Italia Serie A" in modalita:
+        elif (
+            "📂 Database Totale" in modalita
+            or "📂 Database Italia Serie A" in modalita
+        ):
             st.sidebar.header("🎯 SELEZIONA MERCATO")
             mercato_totale_sel = st.sidebar.selectbox(
                 "Mercato da analizzare:", MERCATI_TOTALI
@@ -1317,11 +1368,17 @@ try:
                 "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica (Analisi su Database Generale + Italia Serie A)."
             )
 
-            df_generale = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+            df_generale = load_clean_df(
+                raw_file_bytes, sheet_target="INCROCI GEMINI"
+            )
             df_serie_a = load_database_serie_a_df(raw_file_bytes)
 
-            ranked_strategies_gen = get_sorted_strategies(df_generale, STRATEGIE_SALVATE)
-            ranked_strategies_sa = get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE)
+            ranked_strategies_gen = get_sorted_strategies(
+                df_generale, STRATEGIE_SALVATE
+            )
+            ranked_strategies_sa = get_sorted_strategies(
+                df_serie_a, STRATEGIE_SALVATE
+            )
 
             finestra_alert = st.sidebar.slider(
                 "Finestra Media Mobile per Alert", 10, 50, 20, 5
@@ -1332,12 +1389,18 @@ try:
             alert_minimo_ritardo_zero = []
 
             def analizza_serie_per_trend(
-                tipo_entita, nome_entita, mercato_entita, df_played, wr_target, dettagli_str
+                tipo_entita,
+                nome_entita,
+                mercato_entita,
+                df_played,
+                wr_target,
+                dettagli_str,
             ):
                 tot = len(df_played)
                 if tot >= finestra_alert:
                     df_played["MA"] = (
-                        df_played["WIN"].rolling(window=finestra_alert).mean() * 100
+                        df_played["WIN"].rolling(window=finestra_alert).mean()
+                        * 100
                     )
                     ma_series = df_played["MA"].dropna()
                     if len(ma_series) >= 2:
@@ -1347,7 +1410,9 @@ try:
                         scostamento_da_media = mm_att - wr_target
                         last_win = df_played["WIN"].iloc[-1]
 
-                        res_delays = calculate_delays_and_cycles(df_played["WIN"])
+                        res_delays = calculate_delays_and_cycles(
+                            df_played["WIN"]
+                        )
                         ritardo_attuale = res_delays["ritardo_attuale"]
 
                         if mm_att < wr_target:
@@ -1371,13 +1436,21 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        era_o_e_al_minimo = (mm_prev <= (mm_min_storica + 2.5)) or (mm_att <= (mm_min_storica + 2.5))
-                        if era_o_e_al_minimo and ritardo_attuale == 0 and last_win == 1:
+                        era_o_e_al_minimo = (
+                            mm_prev <= (mm_min_storica + 2.5)
+                        ) or (mm_att <= (mm_min_storica + 2.5))
+                        if (
+                            era_o_e_al_minimo
+                            and ritardo_attuale == 0
+                            and last_win == 1
+                        ):
                             alert_minimo_ritardo_zero.append({
                                 "Tipo": tipo_entita,
                                 "Nome / Mercato": nome_entita,
                                 "Mercato": mercato_entita,
-                                "Stato Trigger": "🔥 PIVOT INVERSIONE (WIN AL MINIMO)",
+                                "Stato Trigger": (
+                                    "🔥 PIVOT INVERSIONE (WIN AL MINIMO)"
+                                ),
                                 "WR Target": f"{format_num_comma(wr_target)}%",
                                 f"MM Prec ({finestra_alert}p)": f"{format_num_comma(mm_prev, 1)}%",
                                 f"MM Attuale ({finestra_alert}p)": f"{format_num_comma(mm_att, 1)}%",
@@ -1386,7 +1459,11 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
-                        elif last_win == 1 and mm_att > mm_prev and mm_att < wr_target:
+                        elif (
+                            last_win == 1
+                            and mm_att > mm_prev
+                            and mm_att < wr_target
+                        ):
                             alert_bounce_back.append({
                                 "Tipo": tipo_entita,
                                 "Nome / Mercato": nome_entita,
@@ -1490,7 +1567,10 @@ try:
             )
             if alert_minimo_ritardo_zero:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_minimo_ritardo_zero)), use_container_width=True
+                    format_dataframe_decimals(
+                        pd.DataFrame(alert_minimo_ritardo_zero)
+                    ),
+                    use_container_width=True,
                 )
             else:
                 st.info(
@@ -1507,12 +1587,11 @@ try:
             )
             if alert_bounce_back:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_bounce_back)), use_container_width=True
+                    format_dataframe_decimals(pd.DataFrame(alert_bounce_back)),
+                    use_container_width=True,
                 )
             else:
-                st.info(
-                    "Nessun altro segnale di ripresa generico registrato."
-                )
+                st.info("Nessun altro segnale di ripresa generico registrato.")
 
             st.markdown("---")
 
@@ -1524,7 +1603,9 @@ try:
             )
             if alert_underperforming:
                 st.dataframe(
-                    format_dataframe_decimals(pd.DataFrame(alert_underperforming)),
+                    format_dataframe_decimals(
+                        pd.DataFrame(alert_underperforming)
+                    ),
                     use_container_width=True,
                 )
             else:
@@ -1533,10 +1614,16 @@ try:
                 )
 
         elif "🔔 Crossover Medie & Sirene" in modalita:
-            st.subheader("🔔 Analisi Crossover Medie Mobili (Sirene di Inversione Trend)")
-            st.caption("Confronta la Media Mobile Veloce con la Media Mobile Lenta per identificare i punti di incrocio (Golden Cross / Bullish Reversal).")
+            st.subheader(
+                "🔔 Analisi Crossover Medie Mobili (Sirene di Inversione Trend)"
+            )
+            st.caption(
+                "Confronta la Media Mobile Veloce con la Media Mobile Lenta per identificare i punti di incrocio (Golden Cross / Bullish Reversal)."
+            )
 
-            df_generale = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+            df_generale = load_clean_df(
+                raw_file_bytes, sheet_target="INCROCI GEMINI"
+            )
             df_serie_a = load_database_serie_a_df(raw_file_bytes)
 
             st.sidebar.markdown("---")
@@ -1545,12 +1632,18 @@ try:
             p_slow = st.sidebar.slider("Periodo MM Lenta (p)", 15, 50, 20, 5)
 
             crossover_alerts = []
+            ma_data_dict = {}
 
             def calcola_crossover(tipo_e, nome_e, mercato_e, df_p, wr_t):
                 tot = len(df_p)
                 if tot >= p_slow:
-                    df_p["MA_FAST"] = df_p["WIN"].rolling(window=p_fast).mean() * 100
-                    df_p["MA_SLOW"] = df_p["WIN"].rolling(window=p_slow).mean() * 100
+                    df_p = df_p.copy()
+                    df_p["MA_FAST"] = (
+                        df_p["WIN"].rolling(window=p_fast).mean() * 100
+                    )
+                    df_p["MA_SLOW"] = (
+                        df_p["WIN"].rolling(window=p_slow).mean() * 100
+                    )
 
                     valid_df = df_p.dropna(subset=["MA_FAST", "MA_SLOW"])
                     if len(valid_df) >= 2:
@@ -1559,10 +1652,13 @@ try:
                         prev_fast = valid_df["MA_FAST"].iloc[-2]
                         prev_slow = valid_df["MA_SLOW"].iloc[-2]
 
-                        # Condizioni per il Crossover
-                        incrocio_rialzista = (prev_fast <= prev_slow) and (curr_fast > curr_slow)
-                        incrocio_ribassista = (prev_fast >= prev_slow) and (curr_fast < curr_slow)
-                        in_trend_positivo = (curr_fast > curr_slow)
+                        incrocio_rialzista = (prev_fast <= prev_slow) and (
+                            curr_fast > curr_slow
+                        )
+                        incrocio_ribassista = (prev_fast >= prev_slow) and (
+                            curr_fast < curr_slow
+                        )
+                        in_trend_positivo = curr_fast > curr_slow
 
                         stato_sirena = "⚪ NEUTRO"
                         if incrocio_rialzista:
@@ -1578,30 +1674,104 @@ try:
                                 "Nome / Mercato": nome_e,
                                 "Mercato": mercato_e,
                                 "Stato Trigger": stato_sirena,
-                                f"MM Veloce ({p_fast}p)": f"{format_num_comma(curr_fast, 1)}%",
-                                f"MM Lenta ({p_slow}p)": f"{format_num_comma(curr_slow, 1)}%",
-                                "WR Target": f"{format_num_comma(wr_t)}%",
+                                f"MM Veloce ({p_fast}p)": curr_fast,
+                                f"MM Lenta ({p_slow}p)": curr_slow,
+                                "WR Target": wr_t,
                                 "Match Totali": tot,
                             })
+                            ma_data_dict[nome_e] = df_p[
+                                ["MA_FAST", "MA_SLOW"]
+                            ].dropna()
 
-            # Scansione su tutte le strategie e mercati
             for item in get_sorted_strategies(df_generale, STRATEGIE_SALVATE):
                 df_s = apply_filters(df_generale, item["params"])
-                calcola_crossover("Strategia (Generale)", item["nome"], item["params"]["MERCATO"], df_s[df_s["GOL CASA"].notna()].copy(), item["win_rate_storico"])
+                calcola_crossover(
+                    "Strategia (Generale)",
+                    item["nome"],
+                    item["params"]["MERCATO"],
+                    df_s[df_s["GOL CASA"].notna()].copy(),
+                    item["win_rate_storico"],
+                )
 
             for item in get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE):
                 df_s = apply_filters(df_serie_a, item["params"])
-                calcola_crossover("Strategia (Serie A)", item["nome"], item["params"]["MERCATO"], df_s[df_s["GOL CASA"].notna()].copy(), item["win_rate_storico"])
+                calcola_crossover(
+                    "Strategia (Serie A)",
+                    item["nome"],
+                    item["params"]["MERCATO"],
+                    df_s[df_s["GOL CASA"].notna()].copy(),
+                    item["win_rate_storico"],
+                )
 
-            st.markdown(f"### 🚨 Sirene ed Incroci Attivi (Veloce {p_fast}p vs Lenta {p_slow}p)")
+            st.markdown(
+                f"### 🚨 Sirene ed Incroci Attivi (Veloce {p_fast}p vs Lenta {p_slow}p)"
+            )
             if crossover_alerts:
                 df_cross = pd.DataFrame(crossover_alerts)
-                # Evidenziamo prima gli incroci appena avvenuti
-                df_cross["Priority"] = df_cross["Stato Trigger"].apply(lambda x: 1 if "SIRENA" in x else 2)
-                df_cross = df_cross.sort_values(by="Priority").drop(columns=["Priority"])
-                st.dataframe(format_dataframe_decimals(df_cross), use_container_width=True)
+                df_cross["Priority"] = df_cross["Stato Trigger"].apply(
+                    lambda x: 1 if "SIRENA" in x else 2
+                )
+                df_cross = df_cross.sort_values(by="Priority").drop(
+                    columns=["Priority"]
+                )
+
+                # Visualizzazione della Tabella con le virgole per i decimali
+                st.dataframe(
+                    format_dataframe_decimals(df_cross),
+                    use_container_width=True,
+                )
+
+                st.markdown("---")
+                st.subheader("📈 Grafico Tracciamento Medie Mobili (Crossover)")
+
+                # Selezione della serie da graficare
+                opzioni_nomi = df_cross["Nome / Mercato"].tolist()
+                nome_selezionato = st.selectbox(
+                    "Seleziona la Strategia/Mercato da visualizzare nel grafico:",
+                    opzioni_nomi,
+                )
+
+                if (
+                    nome_selezionato
+                    and nome_selezionato in ma_data_dict
+                    and not ma_data_dict[nome_selezionato].empty
+                ):
+                    df_plot = ma_data_dict[nome_selezionato]
+
+                    # Generazione del grafico Matplotlib pulito (senza marcatori/pallini)
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    ax.plot(
+                        df_plot.index,
+                        df_plot["MA_FAST"],
+                        label=f"MM Veloce ({p_fast}p)",
+                        linewidth=1.8,
+                        color="#1f77b4",
+                    )
+                    ax.plot(
+                        df_plot.index,
+                        df_plot["MA_SLOW"],
+                        label=f"MM Lenta ({p_slow}p)",
+                        linewidth=1.8,
+                        color="#ff7f0e",
+                    )
+
+                    ax.set_title(
+                        f"Andamento Medie Mobili - {nome_selezionato}",
+                        fontsize=12,
+                        pad=10,
+                    )
+                    ax.set_xlabel("Partite Giocate", fontsize=10)
+                    ax.set_ylabel("Win Rate (%)", fontsize=10)
+                    ax.grid(True, linestyle="--", alpha=0.5)
+                    ax.legend(loc="best")
+                    plt.tight_layout()
+
+                    # Renderizzazione esplicita a schermo subito sotto la tabella
+                    st.pyplot(fig)
             else:
-                st.info("Nessun crossover rialzista rilevato con i parametri correnti.")
+                st.info(
+                    "Nessun crossover rialzista rilevato con i parametri correnti."
+                )
 
         elif "📊" in modalita:
             strat_info = strat_map[strat_nome]
@@ -1704,14 +1874,19 @@ try:
 
             with r2_c4:
                 with st.container(border=True):
-                    st.caption(f"Frequenza Cicli Consecutivi ({params['MERCATO']})")
+                    st.caption(
+                        f"Frequenza Cicli Consecutivi ({params['MERCATO']})"
+                    )
                     if tot_match > 0:
                         df_freq = calcola_frequenza_cicli(
                             df_played["WIN"],
                             res_delays["ritardo_medio"],
-                            f"Esito {params['MERCATO']}"
+                            f"Esito {params['MERCATO']}",
                         )
-                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
+                        st.dataframe(
+                            format_dataframe_decimals(df_freq),
+                            use_container_width=True,
+                        )
                     else:
                         st.write("Nessun dato")
 
@@ -1748,8 +1923,15 @@ try:
                 mercato=params["MERCATO"],
             )
 
-        elif "📂 Database Totale" in modalita or "📂 Database Italia Serie A" in modalita:
-            titolo_sez = "Database Totale" if "Totale" in modalita else "Database Serie A Italia"
+        elif (
+            "📂 Database Totale" in modalita
+            or "📂 Database Italia Serie A" in modalita
+        ):
+            titolo_sez = (
+                "Database Totale"
+                if "Totale" in modalita
+                else "Database Serie A Italia"
+            )
             st.subheader(
                 f"📂 Analisi {titolo_sez} — Mercato: `{mercato_totale_sel}`"
             )
@@ -1860,14 +2042,19 @@ try:
 
             with r2_c4:
                 with st.container(border=True):
-                    st.caption(f"Frequenza Cicli Consecutivi ({mercato_totale_sel})")
+                    st.caption(
+                        f"Frequenza Cicli Consecutivi ({mercato_totale_sel})"
+                    )
                     if tot_match > 0:
                         df_freq = calcola_frequenza_cicli(
                             df_played["WIN"],
                             res_delays["ritardo_medio"],
-                            f"Esito {mercato_totale_sel}"
+                            f"Esito {mercato_totale_sel}",
                         )
-                        st.dataframe(format_dataframe_decimals(df_freq), use_container_width=True)
+                        st.dataframe(
+                            format_dataframe_decimals(df_freq),
+                            use_container_width=True,
+                        )
                     else:
                         st.write("Nessun dato")
 
@@ -1912,11 +2099,17 @@ try:
 
             cicli_target = []
 
-            df_generale = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+            df_generale = load_clean_df(
+                raw_file_bytes, sheet_target="INCROCI GEMINI"
+            )
             df_serie_a = load_database_serie_a_df(raw_file_bytes)
 
-            ranked_strategies_gen = get_sorted_strategies(df_generale, STRATEGIE_SALVATE)
-            ranked_strategies_sa = get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE)
+            ranked_strategies_gen = get_sorted_strategies(
+                df_generale, STRATEGIE_SALVATE
+            )
+            ranked_strategies_sa = get_sorted_strategies(
+                df_serie_a, STRATEGIE_SALVATE
+            )
 
             for item in ranked_strategies_gen:
                 name = item["nome"]
@@ -1946,7 +2139,9 @@ try:
                             "Win Rate Reale": f"{format_num_comma(wr)}%",
                             "Quota Fair": format_num_comma(q_fair),
                             "Match Giocati": tot,
-                            "Filtri / Dettagli": get_combination_string(params),
+                            "Filtri / Dettagli": get_combination_string(
+                                params
+                            ),
                         })
 
             for m in MERCATI_TOTALI:
@@ -2017,7 +2212,9 @@ try:
                             "Win Rate Reale": f"{format_num_comma(wr)}%",
                             "Quota Fair": format_num_comma(q_fair),
                             "Match Giocati": tot,
-                            "Filtri / Dettagli": get_combination_string(params),
+                            "Filtri / Dettagli": get_combination_string(
+                                params
+                            ),
                         })
 
             for m in MERCATI_TOTALI:
@@ -2062,7 +2259,10 @@ try:
 
             if cicli_target:
                 df_cicli_res = pd.DataFrame(cicli_target)
-                st.dataframe(format_dataframe_decimals(df_cicli_res), use_container_width=True)
+                st.dataframe(
+                    format_dataframe_decimals(df_cicli_res),
+                    use_container_width=True,
+                )
             else:
                 st.info(
                     "Al momento nessuna strategia o mercato (Generale o Serie A) ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
