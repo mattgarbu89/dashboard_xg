@@ -1235,6 +1235,7 @@ try:
             "Scegli il tipo di analisi:",
             [
                 "🚨 Panoramica Strategie & Trend",
+                "🔔 Crossover Medie & Sirene",
                 "📊 Strategie xG & Value Bet Finder",
                 "📂 Database Totale (Analisi Mercati)",
                 "📂 Database Italia Serie A",
@@ -1308,7 +1309,7 @@ try:
             )
 
         # --- CORPO PRINCIPALE DASHBOARD ---
-        if "🚨" in modalita:
+        if "🚨 Panoramica Strategie & Trend" in modalita:
             st.subheader(
                 "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion)"
             )
@@ -1530,6 +1531,77 @@ try:
                 st.info(
                     "Tutte le strategie e i mercati sono stabili sopra la loro media target."
                 )
+
+        elif "🔔 Crossover Medie & Sirene" in modalita:
+            st.subheader("🔔 Analisi Crossover Medie Mobili (Sirene di Inversione Trend)")
+            st.caption("Confronta la Media Mobile Veloce con la Media Mobile Lenta per identificare i punti di incrocio (Golden Cross / Bullish Reversal).")
+
+            df_generale = load_clean_df(raw_file_bytes, sheet_target="INCROCI GEMINI")
+            df_serie_a = load_database_serie_a_df(raw_file_bytes)
+
+            st.sidebar.markdown("---")
+            st.sidebar.header("⚙️ Impostazioni Medie Mobili")
+            p_fast = st.sidebar.slider("Periodo MM Veloce (p)", 3, 15, 5, 1)
+            p_slow = st.sidebar.slider("Periodo MM Lenta (p)", 15, 50, 20, 5)
+
+            crossover_alerts = []
+
+            def calcola_crossover(tipo_e, nome_e, mercato_e, df_p, wr_t):
+                tot = len(df_p)
+                if tot >= p_slow:
+                    df_p["MA_FAST"] = df_p["WIN"].rolling(window=p_fast).mean() * 100
+                    df_p["MA_SLOW"] = df_p["WIN"].rolling(window=p_slow).mean() * 100
+
+                    valid_df = df_p.dropna(subset=["MA_FAST", "MA_SLOW"])
+                    if len(valid_df) >= 2:
+                        curr_fast = valid_df["MA_FAST"].iloc[-1]
+                        curr_slow = valid_df["MA_SLOW"].iloc[-1]
+                        prev_fast = valid_df["MA_FAST"].iloc[-2]
+                        prev_slow = valid_df["MA_SLOW"].iloc[-2]
+
+                        # Condizioni per il Crossover
+                        incrocio_rialzista = (prev_fast <= prev_slow) and (curr_fast > curr_slow)
+                        incrocio_ribassista = (prev_fast >= prev_slow) and (curr_fast < curr_slow)
+                        in_trend_positivo = (curr_fast > curr_slow)
+
+                        stato_sirena = "⚪ NEUTRO"
+                        if incrocio_rialzista:
+                            stato_sirena = "🔔 SIRENA RIALZISTA (CROSSOVER)"
+                        elif incrocio_ribassista:
+                            stato_sirena = "🔻 DIVERGENZA RIBASSISTA"
+                        elif in_trend_positivo:
+                            stato_sirena = "🟢 TREND RIALZISTA ATTIVO"
+
+                        if incrocio_rialzista or in_trend_positivo:
+                            crossover_alerts.append({
+                                "Tipo": tipo_e,
+                                "Nome / Mercato": nome_e,
+                                "Mercato": mercato_e,
+                                "Stato Trigger": stato_sirena,
+                                f"MM Veloce ({p_fast}p)": f"{format_num_comma(curr_fast, 1)}%",
+                                f"MM Lenta ({p_slow}p)": f"{format_num_comma(curr_slow, 1)}%",
+                                "WR Target": f"{format_num_comma(wr_t)}%",
+                                "Match Totali": tot,
+                            })
+
+            # Scansione su tutte le strategie e mercati
+            for item in get_sorted_strategies(df_generale, STRATEGIE_SALVATE):
+                df_s = apply_filters(df_generale, item["params"])
+                calcola_crossover("Strategia (Generale)", item["nome"], item["params"]["MERCATO"], df_s[df_s["GOL CASA"].notna()].copy(), item["win_rate_storico"])
+
+            for item in get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE):
+                df_s = apply_filters(df_serie_a, item["params"])
+                calcola_crossover("Strategia (Serie A)", item["nome"], item["params"]["MERCATO"], df_s[df_s["GOL CASA"].notna()].copy(), item["win_rate_storico"])
+
+            st.markdown(f"### 🚨 Sirene ed Incroci Attivi (Veloce {p_fast}p vs Lenta {p_slow}p)")
+            if crossover_alerts:
+                df_cross = pd.DataFrame(crossover_alerts)
+                # Evidenziamo prima gli incroci appena avvenuti
+                df_cross["Priority"] = df_cross["Stato Trigger"].apply(lambda x: 1 if "SIRENA" in x else 2)
+                df_cross = df_cross.sort_values(by="Priority").drop(columns=["Priority"])
+                st.dataframe(format_dataframe_decimals(df_cross), use_container_width=True)
+            else:
+                st.info("Nessun crossover rialzista rilevato con i parametri correnti.")
 
         elif "📊" in modalita:
             strat_info = strat_map[strat_nome]
