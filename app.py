@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -119,7 +120,9 @@ def invia_telegram(testo):
         for i, blocco in enumerate(blocchi):
             ok, err_msg = invia_singolo_messaggio_telegram(chat_id, blocco)
             if not ok:
-                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                url = (
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                )
                 payload = {"chat_id": chat_id, "text": blocco}
                 try:
                     res_fb = requests.post(url, json=payload, timeout=20)
@@ -1631,9 +1634,13 @@ try:
                         df_p["WIN"].rolling(window=p_slow).mean() * 100
                     )
 
+                    # Trigger: Incrocio al rialzo ed ESCLUSIVAMENTE SOTTO LA FREQUENZA MEDIA (WR_TARGET)
                     df_p["sopra"] = df_p["MA_FAST"] > df_p["MA_SLOW"]
-                    df_p["ingresso_trigger"] = (df_p["sopra"] == True) & (
-                        df_p["sopra"].shift(1) == False
+                    df_p["sotto_media"] = df_p["MA_FAST"] < wr_t
+                    df_p["ingresso_trigger"] = (
+                        (df_p["sopra"] == True)
+                        & (df_p["sopra"].shift(1) == False)
+                        & (df_p["sotto_media"] == True)
                     )
 
                     valid_df = df_p.dropna(subset=["MA_FAST", "MA_SLOW"])
@@ -1647,7 +1654,9 @@ try:
 
                         stato_sirena = "🔴 NO INVESTIMENTO"
                         if is_new_trigger:
-                            stato_sirena = "🟢 NUOVO INGRESSO (CROSSOVER)"
+                            stato_sirena = (
+                                "🟢 NUOVO INGRESSO (REVERSIONE SOTTO MEDIA)"
+                            )
                         elif is_active:
                             stato_sirena = "🟡 STRATEGIA IN CORSO"
 
@@ -1694,7 +1703,7 @@ try:
                 )
 
                 st.markdown("---")
-                st.subheader("📈 Grafico Frequenza Reale e Segnali")
+                st.subheader("📈 Grafico Frequenza Reale e Segnali (Plotly)")
 
                 opzioni_nomi = df_cross["Nome / Mercato"].tolist()
                 nome_selezionato = st.selectbox(
@@ -1709,11 +1718,12 @@ try:
                 ):
                     df_plot = full_data_dict[nome_selezionato]
                     ultimo_s = df_plot.iloc[-1]
+                    wr_target = strat_map[nome_selezionato]["win_rate_storico"]
 
                     # Visualizzazione Stato Corrente
                     if ultimo_s["ingresso_trigger"]:
                         st.success(
-                            "🟢 **SEGNALE DI INGRESSO OPERATIVO!** La MM veloce ha appena incrociato al rialzo la MM lenta."
+                            "🟢 **SEGNALE DI INGRESSO OPERATIVO!** La MM veloce ha appena incrociato al rialzo la MM lenta **SOTTO la Frequenza Media**."
                         )
                     elif ultimo_s["sopra"]:
                         st.info(
@@ -1721,67 +1731,150 @@ try:
                         )
                     else:
                         st.warning(
-                            "🔴 **NESSUN INVESTIMENTO:** La MM veloce è sotto la MM lenta. Attendi il prossimo incrocio."
+                            "🔴 **NESSUN INVESTIMENTO:** La MM veloce è sotto la MM lenta."
                         )
 
-                    # GRAFICO COMPLETO
-                    fig, ax = plt.subplots(figsize=(12, 6))
+                    # --- GRAFICO INTERATTIVO PLOTLY ---
+                    fig = go.Figure()
 
-                    # 1. Frequenza Reale (Sullo sfondo, tenue)
-                    ax.plot(
-                        df_plot.index,
-                        df_plot["WIN"] * 100,
-                        label="Esito Match (WIN/LOSS)",
-                        color="gray",
-                        alpha=0.3,
-                        linewidth=1.0,
+                    # 1. Frequenza Reale (Esito Match)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_plot.index,
+                            y=df_plot["WIN"] * 100,
+                            mode="lines",
+                            name="Esito Match (WIN/LOSS)",
+                            line=dict(color="gray", width=1),
+                            opacity=0.3,
+                        )
                     )
 
                     # 2. Media Mobile Veloce
-                    ax.plot(
-                        df_plot.index,
-                        df_plot["MA_FAST"],
-                        label=f"MM Veloce ({p_fast}p)",
-                        color="#1f77b4",
-                        linewidth=2,
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_plot.index,
+                            y=df_plot["MA_FAST"],
+                            mode="lines",
+                            name=f"MM Veloce ({p_fast}p)",
+                            line=dict(color="#1f77b4", width=2),
+                        )
                     )
 
                     # 3. Media Mobile Lenta
-                    ax.plot(
-                        df_plot.index,
-                        df_plot["MA_SLOW"],
-                        label=f"MM Lenta ({p_slow}p)",
-                        color="#ff7f0e",
-                        linewidth=2,
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_plot.index,
+                            y=df_plot["MA_SLOW"],
+                            mode="lines",
+                            name=f"MM Lenta ({p_slow}p)",
+                            line=dict(color="#ff7f0e", width=2),
+                        )
                     )
 
-                    # 4. Marker Punti di Ingresso (Pallini Verdi nei Crossover al Rialzo)
+                    # 4. Frequenza Media (Linea Tratteggiata Rossa)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[df_plot.index.min(), df_plot.index.max()],
+                            y=[wr_target, wr_target],
+                            mode="lines",
+                            name=f"Frequenza Media Target ({format_num_comma(wr_target)}%)",
+                            line=dict(color="red", width=2, dash="dash"),
+                        )
+                    )
+
+                    # 5. Marker Punti di Ingresso / Reversione (Pallini Verdi SOLO sotto la Frequenza Media)
                     ingressi = df_plot[df_plot["ingresso_trigger"]]
-                    ax.scatter(
-                        ingressi.index,
-                        ingressi["MA_FAST"],
-                        color="green",
-                        s=120,
-                        zorder=5,
-                        label="Trigger Ingresso (Crossover)",
-                        marker="o",
+                    if len(ingressi) > 0:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=ingressi.index,
+                                y=ingressi["MA_FAST"],
+                                mode="markers",
+                                name="Trigger Reversione (Incrocio < Freq Media)",
+                                marker=dict(
+                                    color="green",
+                                    size=12,
+                                    symbol="circle",
+                                    line=dict(color="black", width=1),
+                                ),
+                            )
+                        )
+
+                    fig.update_layout(
+                        title=f"Andamento Medie Mobili e Trigger di Reversione - {nome_selezionato}",
+                        xaxis_title="Partite Giocate",
+                        yaxis_title="Win Rate (%)",
+                        hovermode="x unified",
+                        template="plotly_white",
+                        height=550,
                     )
 
-                    ax.set_title(
-                        f"Andamento Medie Mobili e Trigger di Ingresso - {nome_selezionato}",
-                        fontsize=13,
-                        pad=15,
-                    )
-                    ax.set_xlabel("Partite Giocate", fontsize=11)
-                    ax.set_ylabel("Win Rate (%)", fontsize=11)
-                    ax.legend(loc="upper left", frameon=True)
-                    ax.grid(True, linestyle="--", alpha=0.5)
-                    plt.tight_layout()
+                    st.plotly_chart(fig, use_container_width=True)
 
-                    st.pyplot(fig)
+                    # --- METRICHE E TABELLA RIASSUNTIVA RENDIMENTO SEGNALI ---
+                    st.markdown("---")
+                    st.markdown("### 📊 Rendimento e Performace dei Segnali")
+
+                    tot_segnali = len(ingressi)
+                    win_dopo_segnali = 0
+                    profitto_tot_segnali = 0.0
+
+                    dettagli_segnali = []
+
+                    for idx_ing in ingressi.index:
+                        # Verifica esito match successivo o dello stesso match al trigger
+                        esito = df_plot.loc[idx_ing, "WIN"]
+                        is_win = int(esito) == 1
+                        if is_win:
+                            win_dopo_segnali += 1
+
+                        dettagli_segnali.append({
+                            "Match #": idx_ing,
+                            "Data / Incontro": f"Match {idx_ing}",
+                            f"MM Veloce ({p_fast}p)": df_plot.loc[
+                                idx_ing, "MA_FAST"
+                            ],
+                            f"MM Lenta ({p_slow}p)": df_plot.loc[
+                                idx_ing, "MA_SLOW"
+                            ],
+                            "Freq Media Target": wr_target,
+                            "Esito Direct WIN": "✅ WIN" if is_win else "❌ LOSS",
+                        })
+
+                    wr_segnali = (
+                        (win_dopo_segnali / tot_segnali * 100)
+                        if tot_segnali > 0
+                        else 0.0
+                    )
+
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        with st.container(border=True):
+                            st.caption("Segnali Generati (< Freq Media)")
+                            st.markdown(f"### {tot_segnali}")
+                    with m2:
+                        with st.container(border=True):
+                            st.caption("Win Rate sui Segnali")
+                            st.markdown(f"### {format_num_comma(wr_segnali)}%")
+                    with m3:
+                        with st.container(border=True):
+                            st.caption("Esiti Positivi / Totali")
+                            st.markdown(
+                                f"### {win_dopo_segnali} / {tot_segnali}"
+                            )
+
+                    if dettagli_segnali:
+                        st.markdown(
+                            "##### 📋 Tabella Dettaglio Segnali Scattati"
+                        )
+                        df_det_segnali = pd.DataFrame(dettagli_segnali)
+                        st.dataframe(
+                            format_dataframe_decimals(df_det_segnali),
+                            use_container_width=True,
+                        )
             else:
                 st.info(
-                    "Nessun crossover rialzista o trend attivo rilevato con i parametri correnti."
+                    "Nessun crossover rialzista sotto la frequenza media o trend attivo rilevato con i parametri correnti."
                 )
 
         elif "📊" in modalita:
