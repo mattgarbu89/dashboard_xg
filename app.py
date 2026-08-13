@@ -941,7 +941,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         .reset_index(drop=True)
     )
 
-    # Assegnazione indice con numerazione progressiva a partire da 1
     df_played.index = range(1, len(df_played) + 1)
 
     df_future = (
@@ -1104,7 +1103,6 @@ def render_tables(df_filtered, quota_limite, col_casa, col_ospite, mercato=""):
         ]
         cols_played.extend(altre_cols)
 
-        # Invertiamo le righe per la visualizzazione ma SENZA resettare l'indice reale
         df_display = df_played[cols_played].iloc[::-1].copy()
 
         integer_cols = ["GOL CASA", "GOL OSPITE", "WIN"]
@@ -1611,11 +1609,16 @@ try:
 
             st.sidebar.markdown("---")
             st.sidebar.header("⚙️ Impostazioni Medie Mobili")
-            p_fast = st.sidebar.slider("Periodo MM Veloce (p)", 3, 15, 5, 1)
-            p_slow = st.sidebar.slider("Periodo MM Lenta (p)", 15, 50, 20, 5)
+            p_fast = st.sidebar.slider("Periodo MM Veloce (p)", 1, 50, 5, 1)
+            p_slow = st.sidebar.slider("Periodo MM Lenta (p)", 2, 200, 20, 1)
+
+            if p_fast >= p_slow:
+                st.sidebar.error(
+                    "⚠️ La finestra della MM Veloce deve essere minore della MM Lenta!"
+                )
 
             crossover_alerts = []
-            ma_data_dict = {}
+            full_data_dict = {}
 
             def calcola_crossover(tipo_e, nome_e, mercato_e, df_p, wr_t):
                 tot = len(df_p)
@@ -1628,30 +1631,27 @@ try:
                         df_p["WIN"].rolling(window=p_slow).mean() * 100
                     )
 
+                    df_p["sopra"] = df_p["MA_FAST"] > df_p["MA_SLOW"]
+                    df_p["ingresso_trigger"] = (df_p["sopra"] == True) & (
+                        df_p["sopra"].shift(1) == False
+                    )
+
                     valid_df = df_p.dropna(subset=["MA_FAST", "MA_SLOW"])
                     if len(valid_df) >= 2:
-                        curr_fast = valid_df["MA_FAST"].iloc[-1]
-                        curr_slow = valid_df["MA_SLOW"].iloc[-1]
-                        prev_fast = valid_df["MA_FAST"].iloc[-2]
-                        prev_slow = valid_df["MA_SLOW"].iloc[-2]
+                        ultimo_step = valid_df.iloc[-1]
+                        curr_fast = ultimo_step["MA_FAST"]
+                        curr_slow = ultimo_step["MA_SLOW"]
 
-                        incrocio_rialzista = (prev_fast <= prev_slow) and (
-                            curr_fast > curr_slow
-                        )
-                        incrocio_ribassista = (prev_fast >= prev_slow) and (
-                            curr_fast < curr_slow
-                        )
-                        in_trend_positivo = curr_fast > curr_slow
+                        is_new_trigger = ultimo_step["ingresso_trigger"]
+                        is_active = ultimo_step["sopra"]
 
-                        stato_sirena = "⚪ NEUTRO"
-                        if incrocio_rialzista:
-                            stato_sirena = "🔔 SIRENA RIALZISTA (CROSSOVER)"
-                        elif incrocio_ribassista:
-                            stato_sirena = "🔻 DIVERGENZA RIBASSISTA"
-                        elif in_trend_positivo:
-                            stato_sirena = "🟢 TREND RIALZISTA ATTIVO"
+                        stato_sirena = "🔴 NO INVESTIMENTO"
+                        if is_new_trigger:
+                            stato_sirena = "🟢 NUOVO INGRESSO (CROSSOVER)"
+                        elif is_active:
+                            stato_sirena = "🟡 STRATEGIA IN CORSO"
 
-                        if incrocio_rialzista or in_trend_positivo:
+                        if is_active or is_new_trigger:
                             crossover_alerts.append({
                                 "Tipo": tipo_e,
                                 "Nome / Mercato": nome_e,
@@ -1662,9 +1662,8 @@ try:
                                 "WR Target": wr_t,
                                 "Match Totali": tot,
                             })
-                            ma_data_dict[nome_e] = df_p[
-                                ["MA_FAST", "MA_SLOW"]
-                            ].dropna()
+
+                        full_data_dict[nome_e] = df_p
 
             # STRATEGIE VALUTATE ESCLUSIVAMENTE SUL DATABASE GENERALE
             for item in get_sorted_strategies(df_generale, STRATEGIE_SALVATE):
@@ -1683,20 +1682,19 @@ try:
             if crossover_alerts:
                 df_cross = pd.DataFrame(crossover_alerts)
                 df_cross["Priority"] = df_cross["Stato Trigger"].apply(
-                    lambda x: 1 if "SIRENA" in x else 2
+                    lambda x: 1 if "NUOVO" in x else 2
                 )
                 df_cross = df_cross.sort_values(by="Priority").drop(
                     columns=["Priority"]
                 )
 
-                # Tabella con virgola nei decimali
                 st.dataframe(
                     format_dataframe_decimals(df_cross),
                     use_container_width=True,
                 )
 
                 st.markdown("---")
-                st.subheader("📈 Grafico Tracciamento Medie Mobili (Crossover)")
+                st.subheader("📈 Grafico Frequenza Reale e Segnali")
 
                 opzioni_nomi = df_cross["Nome / Mercato"].tolist()
                 nome_selezionato = st.selectbox(
@@ -1706,42 +1704,84 @@ try:
 
                 if (
                     nome_selezionato
-                    and nome_selezionato in ma_data_dict
-                    and not ma_data_dict[nome_selezionato].empty
+                    and nome_selezionato in full_data_dict
+                    and not full_data_dict[nome_selezionato].empty
                 ):
-                    df_plot = ma_data_dict[nome_selezionato]
+                    df_plot = full_data_dict[nome_selezionato]
+                    ultimo_s = df_plot.iloc[-1]
 
-                    fig, ax = plt.subplots(figsize=(10, 4))
+                    # Visualizzazione Stato Corrente
+                    if ultimo_s["ingresso_trigger"]:
+                        st.success(
+                            "🟢 **SEGNALE DI INGRESSO OPERATIVO!** La MM veloce ha appena incrociato al rialzo la MM lenta."
+                        )
+                    elif ultimo_s["sopra"]:
+                        st.info(
+                            "🟡 **STRATEGIA IN CORSO:** La MM veloce è sopra la lenta. Mantieni attiva la strategia."
+                        )
+                    else:
+                        st.warning(
+                            "🔴 **NESSUN INVESTIMENTO:** La MM veloce è sotto la MM lenta. Attendi il prossimo incrocio."
+                        )
+
+                    # GRAFICO COMPLETO
+                    fig, ax = plt.subplots(figsize=(12, 6))
+
+                    # 1. Frequenza Reale (Sullo sfondo, tenue)
+                    ax.plot(
+                        df_plot.index,
+                        df_plot["WIN"] * 100,
+                        label="Esito Match (WIN/LOSS)",
+                        color="gray",
+                        alpha=0.3,
+                        linewidth=1.0,
+                    )
+
+                    # 2. Media Mobile Veloce
                     ax.plot(
                         df_plot.index,
                         df_plot["MA_FAST"],
                         label=f"MM Veloce ({p_fast}p)",
-                        linewidth=1.8,
                         color="#1f77b4",
+                        linewidth=2,
                     )
+
+                    # 3. Media Mobile Lenta
                     ax.plot(
                         df_plot.index,
                         df_plot["MA_SLOW"],
                         label=f"MM Lenta ({p_slow}p)",
-                        linewidth=1.8,
                         color="#ff7f0e",
+                        linewidth=2,
+                    )
+
+                    # 4. Marker Punti di Ingresso (Pallini Verdi nei Crossover al Rialzo)
+                    ingressi = df_plot[df_plot["ingresso_trigger"]]
+                    ax.scatter(
+                        ingressi.index,
+                        ingressi["MA_FAST"],
+                        color="green",
+                        s=120,
+                        zorder=5,
+                        label="Trigger Ingresso (Crossover)",
+                        marker="o",
                     )
 
                     ax.set_title(
-                        f"Andamento Medie Mobili - {nome_selezionato}",
-                        fontsize=12,
-                        pad=10,
+                        f"Andamento Medie Mobili e Trigger di Ingresso - {nome_selezionato}",
+                        fontsize=13,
+                        pad=15,
                     )
-                    ax.set_xlabel("Partite Giocate", fontsize=10)
-                    ax.set_ylabel("Win Rate (%)", fontsize=10)
+                    ax.set_xlabel("Partite Giocate", fontsize=11)
+                    ax.set_ylabel("Win Rate (%)", fontsize=11)
+                    ax.legend(loc="upper left", frameon=True)
                     ax.grid(True, linestyle="--", alpha=0.5)
-                    ax.legend(loc="best")
                     plt.tight_layout()
 
                     st.pyplot(fig)
             else:
                 st.info(
-                    "Nessun crossover rialzista rilevato con i parametri correnti."
+                    "Nessun crossover rialzista o trend attivo rilevato con i parametri correnti."
                 )
 
         elif "📊" in modalita:
