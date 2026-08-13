@@ -1365,7 +1365,7 @@ try:
                 "🚨 Report Sottoperformance & Inversione Trend (Mean Reversion)"
             )
             st.caption(
-                "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica (Analisi su Database Generale + Italia Serie A)."
+                "Identifica Strategie e Mercati al Minimo Storico di Media Mobile pronti al recupero verso la Media Storica."
             )
 
             df_generale = load_clean_df(
@@ -1375,9 +1375,6 @@ try:
 
             ranked_strategies_gen = get_sorted_strategies(
                 df_generale, STRATEGIE_SALVATE
-            )
-            ranked_strategies_sa = get_sorted_strategies(
-                df_serie_a, STRATEGIE_SALVATE
             )
 
             finestra_alert = st.sidebar.slider(
@@ -1475,6 +1472,7 @@ try:
                                 "Filtri": dettagli_str,
                             })
 
+            # 1. ANALISI STRATEGIE PERSONALIZZATE (ESCLUSIVAMENTE SU DATABASE GENERALE)
             for item in ranked_strategies_gen:
                 name = item["nome"]
                 wr_storico = item["win_rate_storico"]
@@ -1483,7 +1481,7 @@ try:
                 df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
 
                 analizza_serie_per_trend(
-                    "Strategia (Generale)",
+                    "Strategia Generale",
                     name,
                     params["MERCATO"],
                     df_played_strat,
@@ -1491,22 +1489,7 @@ try:
                     get_combination_string(params),
                 )
 
-            for item in ranked_strategies_sa:
-                name = item["nome"]
-                wr_storico = item["win_rate_storico"]
-                params = item["params"]
-                df_strat = apply_filters(df_serie_a, params)
-                df_played_strat = df_strat[df_strat["GOL CASA"].notna()].copy()
-
-                analizza_serie_per_trend(
-                    "Strategia (Serie A)",
-                    name,
-                    params["MERCATO"],
-                    df_played_strat,
-                    wr_storico,
-                    get_combination_string(params),
-                )
-
+            # 2. ANALISI MERCATI MACRO SU DATABASE GENERALE
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1533,6 +1516,7 @@ try:
                     "Database Generale (Senza filtri)",
                 )
 
+            # 3. ANALISI MERCATI MACRO SU SERIE A ITALIA
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -1599,7 +1583,7 @@ try:
                 "### 📉 WATCHLIST SOTTOPERFORMANCE (In Attesa del Trigger / WIN)"
             )
             st.caption(
-                "Elenco dei mercati attualmente sotto la media storica. Attendi che facciano una WIN (passando nella prima tabella in alto) prima di puntarli."
+                "Elenco dei mercati attualmente sotto la media storica. Attendi che facciano una WIN prima di puntarli."
             )
             if alert_underperforming:
                 st.dataframe(
@@ -1624,7 +1608,6 @@ try:
             df_generale = load_clean_df(
                 raw_file_bytes, sheet_target="INCROCI GEMINI"
             )
-            df_serie_a = load_database_serie_a_df(raw_file_bytes)
 
             st.sidebar.markdown("---")
             st.sidebar.header("⚙️ Impostazioni Medie Mobili")
@@ -1683,20 +1666,11 @@ try:
                                 ["MA_FAST", "MA_SLOW"]
                             ].dropna()
 
+            # STRATEGIE VALUTATE ESCLUSIVAMENTE SUL DATABASE GENERALE
             for item in get_sorted_strategies(df_generale, STRATEGIE_SALVATE):
                 df_s = apply_filters(df_generale, item["params"])
                 calcola_crossover(
-                    "Strategia (Generale)",
-                    item["nome"],
-                    item["params"]["MERCATO"],
-                    df_s[df_s["GOL CASA"].notna()].copy(),
-                    item["win_rate_storico"],
-                )
-
-            for item in get_sorted_strategies(df_serie_a, STRATEGIE_SALVATE):
-                df_s = apply_filters(df_serie_a, item["params"])
-                calcola_crossover(
-                    "Strategia (Serie A)",
+                    "Strategia Generale",
                     item["nome"],
                     item["params"]["MERCATO"],
                     df_s[df_s["GOL CASA"].notna()].copy(),
@@ -1715,7 +1689,7 @@ try:
                     columns=["Priority"]
                 )
 
-                # Visualizzazione della Tabella con le virgole per i decimali
+                # Tabella con virgola nei decimali
                 st.dataframe(
                     format_dataframe_decimals(df_cross),
                     use_container_width=True,
@@ -1724,10 +1698,9 @@ try:
                 st.markdown("---")
                 st.subheader("📈 Grafico Tracciamento Medie Mobili (Crossover)")
 
-                # Selezione della serie da graficare
                 opzioni_nomi = df_cross["Nome / Mercato"].tolist()
                 nome_selezionato = st.selectbox(
-                    "Seleziona la Strategia/Mercato da visualizzare nel grafico:",
+                    "Seleziona la Strategia da visualizzare nel grafico:",
                     opzioni_nomi,
                 )
 
@@ -1738,7 +1711,6 @@ try:
                 ):
                     df_plot = ma_data_dict[nome_selezionato]
 
-                    # Generazione del grafico Matplotlib pulito (senza marcatori/pallini)
                     fig, ax = plt.subplots(figsize=(10, 4))
                     ax.plot(
                         df_plot.index,
@@ -1766,7 +1738,6 @@ try:
                     ax.legend(loc="best")
                     plt.tight_layout()
 
-                    # Renderizzazione esplicita a schermo subito sotto la tabella
                     st.pyplot(fig)
             else:
                 st.info(
@@ -2094,7 +2065,7 @@ try:
         elif "🔥" in modalita:
             st.subheader("🔥 Strategie & Mercati in Ciclo Max da Puntare")
             st.caption(
-                "Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico (Analisi estesa sia a INCROCI GEMINI sia a Italia Serie A)."
+                "Filtro attivo: mostra solo le strategie/mercati con Ciclo Attuale >= Ciclo Max Storico."
             )
 
             cicli_target = []
@@ -2107,10 +2078,8 @@ try:
             ranked_strategies_gen = get_sorted_strategies(
                 df_generale, STRATEGIE_SALVATE
             )
-            ranked_strategies_sa = get_sorted_strategies(
-                df_serie_a, STRATEGIE_SALVATE
-            )
 
+            # 1. VALUTAZIONE STRATEGIE PERSONALIZZATE (SOLO SU DATABASE GENERALE)
             for item in ranked_strategies_gen:
                 name = item["nome"]
                 params = item["params"]
@@ -2128,7 +2097,7 @@ try:
                         q_fair = (100 / wr) if wr > 0 else 0.0
 
                         cicli_target.append({
-                            "Tipo": "Strategia (Generale)",
+                            "Tipo": "Strategia Generale",
                             "Nome / Mercato": name,
                             "Mercato Specifico": params["MERCATO"],
                             "Ciclo Attuale": c_att,
@@ -2144,6 +2113,7 @@ try:
                             ),
                         })
 
+            # 2. MERCATI MACRO SU DATABASE GENERALE
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -2184,39 +2154,7 @@ try:
                             ),
                         })
 
-            for item in ranked_strategies_sa:
-                name = item["nome"]
-                params = item["params"]
-                df_strat = apply_filters(df_serie_a, params)
-                df_played = df_strat[df_strat["GOL CASA"].notna()].copy()
-
-                if len(df_played) > 0:
-                    delays = calculate_delays_and_cycles(df_played["WIN"])
-                    c_att = delays["ciclo_attuale"]
-                    c_max = delays["ciclo_max_storico"]
-
-                    if c_att >= c_max and c_max > 0:
-                        tot = len(df_played)
-                        wr = df_played["WIN"].sum() / tot * 100
-                        q_fair = (100 / wr) if wr > 0 else 0.0
-
-                        cicli_target.append({
-                            "Tipo": "Strategia (Serie A)",
-                            "Nome / Mercato": name,
-                            "Mercato Specifico": params["MERCATO"],
-                            "Ciclo Attuale": c_att,
-                            "Ciclo Max Storico": c_max,
-                            "Ritardo Medio": format_num_comma(
-                                delays["ritardo_medio"], 2
-                            ),
-                            "Win Rate Reale": f"{format_num_comma(wr)}%",
-                            "Quota Fair": format_num_comma(q_fair),
-                            "Match Giocati": tot,
-                            "Filtri / Dettagli": get_combination_string(
-                                params
-                            ),
-                        })
-
+            # 3. MERCATI MACRO SU SERIE A ITALIA
             for m in MERCATI_TOTALI:
                 params_m = {
                     "SOMMA": None,
@@ -2265,7 +2203,7 @@ try:
                 )
             else:
                 st.info(
-                    "Al momento nessuna strategia o mercato (Generale o Serie A) ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
+                    "Al momento nessuna strategia o mercato ha il Ciclo Attuale maggiore o uguale al Ciclo Max Storico."
                 )
 
 except Exception as e:
